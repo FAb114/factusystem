@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sistema de Facturación y Gestión Comercial Multisucursal" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.supabase.co https://*.supabase.co wss://*.supabase.co; font-src 'self' data:;" />
+    
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <title>FactuSystem - Sistema de Facturación</title>
+
+    <!-- Preload de fuentes críticas -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <!-- Contenedor raíz de React -->
+    <div id="root"></div>
+
+    <!-- Spinner de carga inicial -->
+    <div id="app-loader" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      color: white;
+    ">
+      <div style="text-align: center;">
+        <!-- Logo o icono -->
+        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px; animation: pulse 2s ease-in-out infinite;">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        
+        <h1 style="font-size: 2rem; font-weight: 700; margin-bottom: 10px;">
+          FactuSystem
+        </h1>
+        
+        <p style="font-size: 1rem; opacity: 0.9; margin-bottom: 30px;">
+          Cargando sistema...
+        </p>
+        
+        <!-- Barra de carga animada -->
+        <div style="
+          width: 200px;
+          height: 4px;
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 2px;
+          overflow: hidden;
+        ">
+          <div style="
+            width: 50%;
+            height: 100%;
+            background: white;
+            animation: loading 1.5s ease-in-out infinite;
+          "></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estilos de animación -->
+    <style>
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      @keyframes loading {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(300%);
+        }
+      }
+
+      /* Reset básico */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overflow: hidden;
+      }
+
+      code {
+        font-family: 'Roboto Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+          monospace;
+      }
+
+      /* Ocultar scrollbars personalizados (opcional) */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    </style>
+
+    <!-- Script principal de React -->
+    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Script para ocultar loader cuando React esté listo -->
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        // El loader se ocultará desde React cuando esté montado
+        console.log('DOM cargado - FactuSystem');
+      });
+    </script>
+  </body>
+</html>

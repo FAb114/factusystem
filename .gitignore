@@ -1,0 +1,78 @@
+# ----------------------------------------
+# DEPENDENCIAS Y CONSTRUCCIÓN (BUILD)
+# ----------------------------------------
+
+# Dependencias de Node.js
+/node_modules
+/server/node_modules # Si tienes un backend de Node.js separado
+
+# Archivos de construcción y output de Vite/Bundler
+/dist
+/build
+/out # Común en Electron/electron-builder
+
+# Caché de Vite y del entorno
+.vite/
+.eslintcache
+
+# Archivos de compilación de TypeScript (si usas TS)
+*.tsbuildinfo
+
+# ----------------------------------------
+# ENTORNO Y CONFIGURACIÓN LOCAL
+# ----------------------------------------
+
+# Variables de entorno (¡CRUCIAL ignorar para no subir claves!)
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+!*.env.example # Mantener el archivo de ejemplo para referencia
+
+# Archivos del IDE (Ignora carpetas de configuración local del editor)
+.vscode/ # VS Code
+.idea/   # IntelliJ / WebStorm
+*.iml    # IntelliJ
+*.suo
+
+# ----------------------------------------
+# ELECTRON Y EMPAQUETADO
+# ----------------------------------------
+
+# Logotipos, cachés y artefactos de Electron/Electron-Builder
+# ¡IMPORTANTE! Mantener 'electron-builder.json'
+electron/logs/
+release/
+temp/
+# Archivos específicos de la aplicación instalada (dependiendo del OS)
+*.asar
+
+# ----------------------------------------
+# BASES DE DATOS LOCALES Y LOGS
+# ----------------------------------------
+
+# Logs generados
+*.log
+npm-debug.log*
+
+# Bases de datos locales PouchDB/CouchDB
+# Ignorar cualquier archivo .db o carpeta de datos que PouchDB pueda crear
+/database/local-data/
+*.db
+*.sqlite
+data.json # Si se usa para almacenamiento local
+
+# ----------------------------------------
+# OTROS ARCHIVOS TEMPORALES Y DEL SISTEMA
+# ----------------------------------------
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Temporales de Vim/Emacs/Nano
+*~
+#*#
