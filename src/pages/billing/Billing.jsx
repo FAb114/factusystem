@@ -19,10 +19,30 @@ import {
 } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
-import { useSearchProducts } from '../../hooks/useProducts';
-import { formatCurrency, formatInvoiceNumber } from '../../utils/formatters';
-import { INVOICE_TYPES, PAYMENT_METHODS, IVA_RATES } from '../../utils/constants';
 import toast from 'react-hot-toast';
+
+// Importar constantes
+const INVOICE_TYPES = {
+  FACTURA_A: { code: '01', name: 'Factura A', letter: 'A' },
+  FACTURA_B: { code: '06', name: 'Factura B', letter: 'B' },
+  FACTURA_C: { code: '11', name: 'Factura C', letter: 'C' },
+};
+
+const PAYMENT_METHODS = {
+  CASH: { code: 'cash', name: 'Efectivo', icon: 'DollarSign' },
+  DEBIT_CARD: { code: 'debit_card', name: 'Débito', icon: 'CreditCard' },
+  CREDIT_CARD: { code: 'credit_card', name: 'Crédito', icon: 'CreditCard' },
+  TRANSFER: { code: 'transfer', name: 'Transferencia', icon: 'Smartphone' },
+  MERCADO_PAGO: { code: 'mercado_pago', name: 'Mercado Pago', icon: 'Smartphone' },
+};
+
+// Función auxiliar para formatear moneda
+const formatCurrency = (amount) => {
+  return new Intl.NumberFormat('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+  }).format(amount || 0);
+};
 
 function Billing() {
   const navigate = useNavigate();
@@ -40,21 +60,66 @@ function Billing() {
   const [items, setItems] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [discount, setDiscount] = useState(0);
-  const [discountType, setDiscountType] = useState('percentage'); // 'percentage' o 'fixed'
+  const [discountType, setDiscountType] = useState('percentage');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
-
-  // Hook para buscar productos
-  const { data: searchResults, isLoading: isSearching } = useSearchProducts(
-    searchQuery,
-    searchQuery.length >= 2
-  );
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Focus en input de código de barras al montar
   useEffect(() => {
-    barcodeInputRef.current?.focus();
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
   }, []);
+
+  // Simular búsqueda de productos
+  useEffect(() => {
+    if (searchQuery.length >= 2) {
+      setIsSearching(true);
+      
+      // Simular delay de búsqueda
+      const timeoutId = setTimeout(() => {
+        // Productos de ejemplo
+        const mockProducts = [
+          {
+            id: '1',
+            name: 'Producto Ejemplo 1',
+            code: 'PROD001',
+            barcode: '7790001234567',
+            price: 1500,
+            stock: 50,
+            iva_rate: 21,
+            image_url: null,
+          },
+          {
+            id: '2',
+            name: 'Producto Ejemplo 2',
+            code: 'PROD002',
+            barcode: '7790001234568',
+            price: 2500,
+            stock: 30,
+            iva_rate: 21,
+            image_url: null,
+          },
+        ].filter(
+          (p) =>
+            p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            p.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            p.barcode.includes(searchQuery)
+        );
+
+        setSearchResults(mockProducts);
+        setIsSearching(false);
+      }, 300);
+
+      return () => clearTimeout(timeoutId);
+    } else {
+      setSearchResults([]);
+      setIsSearching(false);
+    }
+  }, [searchQuery]);
 
   // Manejar búsqueda de producto
   const handleProductSearch = (query) => {
@@ -66,7 +131,6 @@ function Billing() {
     const existingItem = items.find((item) => item.id === product.id);
 
     if (existingItem) {
-      // Incrementar cantidad
       setItems(
         items.map((item) =>
           item.id === product.id
@@ -75,7 +139,6 @@ function Billing() {
         )
       );
     } else {
-      // Agregar nuevo producto
       setItems([
         ...items,
         {
@@ -91,9 +154,10 @@ function Billing() {
       ]);
     }
 
-    // Limpiar búsqueda
     setSearchQuery('');
-    barcodeInputRef.current?.focus();
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
     
     toast.success(`${product.name} agregado`);
   };
@@ -179,12 +243,10 @@ function Billing() {
   const handleInvoiceTypeChange = (type) => {
     setInvoiceType(type);
     
-    // Si cambia a Factura A, ajustar precios sin IVA
     if (type === 'FACTURA_A') {
       setItems(
         items.map((item) => ({
           ...item,
-          // Extraer IVA del precio
           price: item.price / (1 + item.ivaRate / 100),
         }))
       );
@@ -209,7 +271,6 @@ function Billing() {
       return;
     }
 
-    // TODO: Implementar lógica de guardado de venta
     console.log('Venta completada:', {
       client,
       invoiceType,
@@ -232,7 +293,9 @@ function Billing() {
       ivaCondition: 'consumidor_final',
     });
     
-    barcodeInputRef.current?.focus();
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
   };
 
   return (
@@ -248,34 +311,30 @@ function Billing() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Selector de tipo de factura */}
             <div className="flex bg-gray-100 rounded-lg p-1">
-              {Object.keys(INVOICE_TYPES)
-                .filter((key) => key.startsWith('FACTURA_'))
-                .map((key) => (
-                  <button
-                    key={key}
-                    onClick={() => handleInvoiceTypeChange(key)}
-                    className={`px-4 py-2 rounded-md font-medium transition ${
-                      invoiceType === key
-                        ? 'bg-white text-blue-600 shadow-sm'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    {INVOICE_TYPES[key].letter}
-                  </button>
-                ))}
+              {Object.keys(INVOICE_TYPES).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => handleInvoiceTypeChange(key)}
+                  className={`px-4 py-2 rounded-md font-medium transition ${
+                    invoiceType === key
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {INVOICE_TYPES[key].letter}
+                </button>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Panel izquierdo - Lista de productos */}
+        {/* Panel izquierdo */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Cliente y búsqueda */}
           <div className="bg-white border-b border-gray-200 px-6 py-4 space-y-4">
-            {/* Cliente */}
             <div className="flex items-center gap-4">
               <button
                 onClick={handleClientSelect}
@@ -290,19 +349,17 @@ function Billing() {
               </button>
             </div>
 
-            {/* Búsqueda de productos */}
             <div className="relative">
               <Input
                 ref={barcodeInputRef}
                 type="text"
-                placeholder="Buscar producto por nombre, código o escanear código de barras..."
+                placeholder="Buscar producto por nombre, código o código de barras..."
                 value={searchQuery}
                 onChange={(e) => handleProductSearch(e.target.value)}
                 icon={Search}
                 fullWidth
               />
 
-              {/* Resultados de búsqueda */}
               {searchQuery && searchResults && searchResults.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
                   {searchResults.map((product) => (
@@ -344,9 +401,7 @@ function Billing() {
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <Package className="w-24 h-24 mb-4" />
                 <p className="text-lg font-medium">No hay productos agregados</p>
-                <p className="text-sm">
-                  Busque o escanee productos para comenzar
-                </p>
+                <p className="text-sm">Busque o escanee productos para comenzar</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -376,7 +431,6 @@ function Billing() {
                       </div>
 
                       <div className="flex items-center gap-3">
-                        {/* Cantidad */}
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => updateQuantity(item.id, item.quantity - 1)}
@@ -401,20 +455,16 @@ function Billing() {
                           </button>
                         </div>
 
-                        {/* Precio */}
                         <div className="w-32">
                           <input
                             type="number"
                             value={item.price}
-                            onChange={(e) =>
-                              updatePrice(item.id, e.target.value)
-                            }
+                            onChange={(e) => updatePrice(item.id, e.target.value)}
                             className="w-full text-right border border-gray-300 rounded px-3 py-2 font-medium"
                             step="0.01"
                           />
                         </div>
 
-                        {/* Subtotal */}
                         <div className="w-32 text-right">
                           <p className="font-bold text-gray-900">
                             {formatCurrency(calculateItemSubtotal(item))}
@@ -426,7 +476,6 @@ function Billing() {
                           )}
                         </div>
 
-                        {/* Eliminar */}
                         <button
                           onClick={() => removeItem(item.id)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded transition"
@@ -442,13 +491,10 @@ function Billing() {
           </div>
         </div>
 
-        {/* Panel derecho - Totales y pago */}
+        {/* Panel derecho */}
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
-          {/* Descuento */}
           <div className="p-6 border-b border-gray-200">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">
-              Descuento
-            </h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Descuento</h3>
             <div className="flex gap-2">
               <input
                 type="number"
@@ -469,21 +515,16 @@ function Billing() {
             </div>
           </div>
 
-          {/* Totales */}
           <div className="p-6 space-y-3 border-b border-gray-200">
             <div className="flex justify-between text-gray-600">
               <span>Subtotal:</span>
-              <span className="font-medium">
-                {formatCurrency(totals.subtotal)}
-              </span>
+              <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
             </div>
 
             {totals.discount > 0 && (
               <div className="flex justify-between text-green-600">
                 <span>Descuento:</span>
-                <span className="font-medium">
-                  -{formatCurrency(totals.discount)}
-                </span>
+                <span className="font-medium">-{formatCurrency(totals.discount)}</span>
               </div>
             )}
 
@@ -504,7 +545,6 @@ function Billing() {
             </div>
           </div>
 
-          {/* Métodos de pago */}
           <div className="flex-1 p-6 overflow-y-auto">
             <h3 className="text-sm font-medium text-gray-700 mb-4">
               Método de Pago
@@ -528,7 +568,6 @@ function Billing() {
             </div>
           </div>
 
-          {/* Botón de completar venta */}
           <div className="p-6 border-t border-gray-200">
             <Button
               onClick={completeSale}
