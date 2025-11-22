@@ -18,53 +18,58 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.0",
-    "zustand": "^4.4.7",
-    "@tanstack/react-query": "^5.14.2",
+    "@hookform/resolvers": "^3.3.4",
     "@supabase/supabase-js": "^2.39.3",
+    "@tanstack/react-query": "^5.14.2",
+    "axios": "^1.6.5",
+    "body-parser": "^2.2.0",
+    "clsx": "^2.1.0",
+    "cors": "^2.8.5",
+    "date-fns": "^3.0.6",
+    "electron-store": "^8.1.0",
+    "express": "^5.1.0",
+    "html2canvas": "^1.4.1",
+    "jsbarcode": "^3.11.6",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "lucide-react": "^0.303.0",
+    "mercadopago": "^2.10.0",
     "pouchdb": "^8.0.1",
     "pouchdb-adapter-http": "^8.0.1",
-    "axios": "^1.6.5",
-    "socket.io-client": "^4.6.1",
-    "date-fns": "^3.0.6",
-    "react-hot-toast": "^2.4.1",
-    "lucide-react": "^0.303.0",
-    "jspdf": "^2.5.1",
-    "html2canvas": "^1.4.1",
-    "jspdf-autotable": "^3.8.2",
-    "react-hook-form": "^7.49.3",
-    "zod": "^3.22.4",
-    "@hookform/resolvers": "^3.3.4",
-    "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.0",
-    "recharts": "^2.10.4",
-    "electron-store": "^8.1.0",
     "qrcode": "^1.5.3",
-    "jsbarcode": "^3.11.6",
-    "uuid": "^9.0.1"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.49.3",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.21.0",
+    "recharts": "^2.10.4",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.6.1",
+    "tailwind-merge": "^2.2.0",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4",
+    "zustand": "^4.4.7"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "electron": "^28.1.4",
     "electron-builder": "^24.9.1",
     "electron-devtools-installer": "^3.2.0",
-    "vite": "^5.0.11",
-    "tailwindcss": "^3.4.1",
-    "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.33",
     "eslint": "^8.56.0",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "postcss": "^8.4.33",
     "prettier": "^3.2.4",
     "prettier-plugin-tailwindcss": "^0.5.11",
-    "concurrently": "^8.2.2",
-    "wait-on": "^7.2.0",
-    "cross-env": "^7.0.3"
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.0.11",
+    "wait-on": "^7.2.0"
   },
   "build": {
     "appId": "com.factusystem.app",
@@ -78,16 +83,23 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "public/icon.icns",
       "category": "public.app-category.business"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "public/icon.png",
       "category": "Office"
     },
