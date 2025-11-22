@@ -181,13 +181,15 @@ export default function Billing() {
       const fiscalType = selectedClient.condition === 'RI' ? 'A' : 'B';
       if (invoiceType !== fiscalType) {
         setInvoiceType(fiscalType);
-        toast.info(`Cambiado automáticamente a Factura ${fiscalType} por método de pago no efectivo`);
+        toast(`Cambiado automáticamente a Factura ${fiscalType} por método de pago no efectivo`); 
       }
     } else {
       // TODOS los pagos son efectivo → Factura X
       if (invoiceType !== 'X') {
         setInvoiceType('X');
-        toast.info('Cambiado automáticamente a Factura X (todos los pagos en efectivo)');
+        toast('Cambiado automáticamente a Factura X (todos los pagos en efectivo)', {
+  icon: 'ℹ️',
+});
       }
     }
   }, [payments, selectedClient.condition]);
