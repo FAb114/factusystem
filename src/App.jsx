@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import BranchSelector from './pages/auth/BranchSelector';
 import CashOpening from './pages/auth/CashOpening';
 import Billing from './pages/billing/Billing';
+import SalesList from './pages/sales/SalesList';
 
 // Layout
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -105,7 +106,7 @@ function App() {
                     {/* Aquí irán las rutas de los módulos */}
                     <Route path="billing" element={<Billing />} />
                     {/* <Route path="products" element={<Products />} /> */}
-                    {/* <Route path="sales" element={<Sales />} /> */}
+                    <Route path="sales" element={<SalesList />} />
                     {/* etc... */}
                   </Routes>
                 </DashboardLayout>
