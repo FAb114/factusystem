@@ -1,3 +1,5 @@
+// src/pages/billing/Billing.jsx - CONECTADO A BASE DE DATOS
+
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -7,31 +9,22 @@ import {
   Printer,
   CreditCard,
   CheckCircle,
-  AlertTriangle,
   User,
   ShoppingCart,
   FileText,
   DollarSign,
   X,
-  Save,
   Mail,
   MessageCircle,
-  Smartphone,
-  ArrowRight,
-  Barcode,
-  Calculator,
-  Receipt,
-  Building2,
   Clock,
   Check,
-  AlertCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCurrentUser, useCurrentBranch } from '../../store/slices/authSlice';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
-import { INVOICE_TYPES, PAYMENT_METHODS, IVA_CONDITIONS } from '../../utils/constants';
+import * as salesApi from '../../services/api/sales.api';
 
-// --- DATOS INICIALES ---
+// Datos iniciales (se mantendrán para el funcionamiento offline)
 const INITIAL_PRODUCTS = [
   { id: '101', code: '779001', name: 'Coca Cola 2.25L', price: 2500, stock: 50, iva: 21, category: 'Bebidas' },
   { id: '102', code: '779002', name: 'Fernet Branca 750ml', price: 9500, stock: 24, iva: 21, category: 'Bebidas' },
@@ -72,7 +65,6 @@ const INITIAL_CLIENTS = [
   },
 ];
 
-// --- COMPONENTE PRINCIPAL ---
 export default function Billing() {
   const navigate = useNavigate();
   const user = useCurrentUser();
@@ -128,7 +120,7 @@ export default function Billing() {
   const priceInputRef = useRef(null);
   const discInputRef = useRef(null);
 
-  // --- CALCULOS ---
+  // CALCULOS
   const currentNumber = useMemo(() => {
     if (['A', 'B', 'C'].includes(invoiceType)) return counters.afip;
     if (invoiceType === 'X') return counters.x;
@@ -162,10 +154,9 @@ export default function Billing() {
     };
   }, [items, payments, invoiceType]);
 
-  // --- LÓGICA AUTOMÁTICA DE TIPO DE COMPROBANTE ---
+  // LÓGICA AUTOMÁTICA DE TIPO DE COMPROBANTE
   useEffect(() => {
     if (payments.length === 0) {
-      // Sin pagos aún, mantener el tipo según cliente
       if (selectedClient.condition === 'RI') {
         setInvoiceType('A');
       } else {
@@ -177,28 +168,25 @@ export default function Billing() {
     const hasNonCash = payments.some((p) => p.method !== 'Efectivo');
 
     if (hasNonCash) {
-      // Hay al menos un pago que NO es efectivo → Factura Fiscal
       const fiscalType = selectedClient.condition === 'RI' ? 'A' : 'B';
       if (invoiceType !== fiscalType) {
         setInvoiceType(fiscalType);
         toast(`Cambiado automáticamente a Factura ${fiscalType} por método de pago no efectivo`); 
       }
     } else {
-      // TODOS los pagos son efectivo → Factura X
       if (invoiceType !== 'X') {
         setInvoiceType('X');
         toast('Cambiado automáticamente a Factura X (todos los pagos en efectivo)', {
-  icon: 'ℹ️',
-});
+          icon: 'ℹ️',
+        });
       }
     }
   }, [payments, selectedClient.condition]);
 
-  // --- SIMULACIÓN DE NOTIFICACIONES DE MERCADO PAGO ---
+  // SIMULACIÓN DE NOTIFICACIONES DE MERCADO PAGO
   useEffect(() => {
     if (!waitingForPayment) return;
 
-    // Simulación: después de 3 segundos llega la notificación de pago
     const timer = setTimeout(() => {
       const paymentInfo = {
         type: paymentMethod === 'QR (Mercado Pago)' ? 'QR' : 'Transferencia',
@@ -209,11 +197,8 @@ export default function Billing() {
 
       setPaymentNotification(paymentInfo);
       setWaitingForPayment(false);
-
-      // Agregar el pago automáticamente
       handleConfirmPaymentNotification(paymentInfo);
 
-      // Toast de éxito
       toast.success(
         `💳 Pago ${paymentInfo.type} recibido: ${formatCurrency(paymentInfo.amount)}`,
         { duration: 5000 }
@@ -223,7 +208,7 @@ export default function Billing() {
     return () => clearTimeout(timer);
   }, [waitingForPayment]);
 
-  // --- HANDLERS CLIENTE ---
+  // HANDLERS CLIENTE
   const handleClientKeyDown = (e) => {
     if (e.key === 'Enter') {
       if (!clientSearch.trim()) {
@@ -243,7 +228,6 @@ export default function Billing() {
     setClientSearch('');
     setShowClientList(false);
 
-    // Establecer tipo de factura por defecto según cliente
     if (payments.length === 0) {
       if (client.condition === 'RI') setInvoiceType('A');
       else setInvoiceType('X');
@@ -252,7 +236,7 @@ export default function Billing() {
     setTimeout(() => prodInputRef.current?.focus(), 100);
   };
 
-  // --- HANDLERS PRODUCTO ---
+  // HANDLERS PRODUCTO
   const prepareEntryItem = (product, isGeneric = false) => {
     setEntryItem({
       id: isGeneric ? null : product.id,
@@ -329,7 +313,7 @@ export default function Billing() {
     setItems(items.filter((i) => i.id !== id));
   };
 
-  // --- PAGOS ---
+  // PAGOS
   const handleAddPayment = () => {
     const val = parseFloat(paymentAmount);
     if (!val || val <= 0) {
@@ -337,14 +321,12 @@ export default function Billing() {
       return;
     }
 
-    // Si es Mercado Pago (QR o Transferencia), iniciar espera de notificación
     if (paymentMethod === 'QR (Mercado Pago)' || paymentMethod === 'Transferencia (MP)') {
       setWaitingForPayment(true);
       toast.loading('Esperando confirmación de pago...', { duration: 3000 });
       return;
     }
 
-    // Pago normal (Efectivo, Tarjeta, etc.)
     const newPayment = { method: paymentMethod, amount: val };
     setPayments([...payments, newPayment]);
     setPaymentAmount('');
@@ -370,6 +352,12 @@ export default function Billing() {
     setPayments(newPayments);
   };
 
+  // FUNCIÓN PARA GENERAR CAE MOCK
+  const generateMockCAE = () => {
+    return Math.random().toString().slice(2, 16).padStart(14, '0');
+  };
+
+  // CONFIRMAR VENTA - GUARDAR EN BASE DE DATOS
   const handleConfirmSale = async () => {
     // Validaciones
     if (items.length === 0) {
@@ -382,7 +370,6 @@ export default function Billing() {
       return;
     }
 
-    // Validación de seguridad
     if (invoiceType === 'X' && payments.some((p) => p.method !== 'Efectivo')) {
       toast.error('⚠️ No se puede emitir Factura X con pagos no efectivo');
       return;
@@ -391,9 +378,63 @@ export default function Billing() {
     setIsProcessing(true);
 
     try {
-      await new Promise((r) => setTimeout(r, 1500));
+      // Preparar datos para guardar
+      const saleData = {
+        invoiceType,
+        pointOfSale: posNumber,
+        invoiceNumber: currentNumber,
+        clientId: selectedClient.id !== 'C0' ? selectedClient.id : null,
+        userId: user?.id,
+        branchId: branch?.id,
+        items: items.map(item => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          discount: item.discount || 0,
+          iva: item.iva || 21,
+        })),
+        payments: payments.map(p => ({
+          method: p.method,
+          amount: p.amount,
+          status: p.status || 'approved',
+          transactionId: p.transactionId,
+        })),
+        subtotal: invoiceType === 'A' ? totals.subtotalNeto : totals.total,
+        discount: 0,
+        tax: invoiceType === 'A' ? totals.totalIva : 0,
+        total: totals.total,
+        // CAE solo para facturas fiscales (simulado)
+        cae: ['A', 'B', 'C'].includes(invoiceType) ? generateMockCAE() : null,
+        caeExpiration: ['A', 'B', 'C'].includes(invoiceType) 
+          ? new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString() // 10 días
+          : null,
+        cashSessionId: null, // TODO: Obtener de la sesión de caja actual
+      };
 
+      console.log('📤 Enviando venta a la base de datos:', saleData);
+
+      // Guardar en base de datos
+      const result = await salesApi.createSale(saleData);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Error al guardar la venta');
+      }
+
+      console.log('✅ Venta guardada correctamente:', result.data);
+
+      // Actualizar contadores locales
+      setCounters((prev) => {
+        if (['A', 'B', 'C'].includes(invoiceType))
+          return { ...prev, afip: prev.afip + 1 };
+        if (invoiceType === 'X') return { ...prev, x: prev.x + 1 };
+        return { ...prev, presupuesto: prev.presupuesto + 1 };
+      });
+
+      // Preparar datos para mostrar
       const finalData = {
+        ...result.data,
         client: selectedClient,
         items,
         totals,
@@ -402,23 +443,16 @@ export default function Billing() {
         number: currentNumber,
         pos: posNumber,
         date: new Date(),
-        cae: ['A', 'B', 'C'].includes(invoiceType) ? '73459823475234' : null,
-        caeVto: ['A', 'B', 'C'].includes(invoiceType) ? '2025-12-31' : null,
+        cae: saleData.cae,
+        caeVto: saleData.caeExpiration,
       };
 
-      // Actualizar contadores
-      setCounters((prev) => {
-        if (['A', 'B', 'C'].includes(invoiceType))
-          return { ...prev, afip: prev.afip + 1 };
-        if (invoiceType === 'X') return { ...prev, x: prev.x + 1 };
-        return { ...prev, presupuesto: prev.presupuesto + 1 };
-      });
-
       setSuccessData(finalData);
-      toast.success('¡Venta registrada exitosamente!');
+      toast.success('¡Venta registrada exitosamente en la base de datos!');
+
     } catch (error) {
-      toast.error('Error al procesar la venta');
-      console.error(error);
+      toast.error(error.message || 'Error al procesar la venta');
+      console.error('❌ Error en venta:', error);
     } finally {
       setIsProcessing(false);
       setPaymentModalOpen(false);
@@ -445,7 +479,7 @@ export default function Billing() {
     });
   };
 
-  // --- VISTA DE ÉXITO ---
+  // VISTA DE ÉXITO
   if (successData) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col items-center p-4 overflow-y-auto">
@@ -533,6 +567,12 @@ export default function Billing() {
                   <p className="text-xs text-gray-500">
                     {formatDateTime(successData.date)}
                   </p>
+                  {successData.cae && (
+                    <div className="mt-2 text-xs">
+                      <p><strong>CAE:</strong> {successData.cae}</p>
+                      <p><strong>Vto. CAE:</strong> {formatDateTime(successData.caeVto)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -566,7 +606,7 @@ export default function Billing() {
                       </td>
                       <td className="text-right p-2 font-bold">
                         {formatCurrency(
-                          item.price * item.quantity * (1 - item.discount / 100)
+                          item.price * item.quantity * (1 - (item.discount || 0) / 100)
                         )}
                       </td>
                     </tr>
@@ -599,7 +639,7 @@ export default function Billing() {
     );
   }
 
-  // --- VISTA PRINCIPAL DE FACTURACIÓN ---
+  // VISTA PRINCIPAL DE FACTURACIÓN
   return (
     <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
       {/* HEADER */}
@@ -698,7 +738,6 @@ export default function Billing() {
           <div className="flex items-center gap-4">
             {branch && (
               <div className="flex items-center gap-2 text-sm text-slate-600">
-                <Building2 size={16} />
                 <span>{branch.name}</span>
               </div>
             )}
@@ -1023,7 +1062,7 @@ export default function Billing() {
                 </span>
               </div>
 
-              {/* Tipo de comprobante actual */}
+              {/* Tipo de comprobante */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-3">
                 <FileText className="text-blue-600" size={20} />
                 <div className="flex-1">
