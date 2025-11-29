@@ -1,5 +1,3 @@
-// src/pages/billing/Billing.jsx - CONECTADO A BASE DE DATOS
-
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -20,9 +18,15 @@ import {
   Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+// Corrección: Volvemos a rutas relativas para asegurar compatibilidad
 import { useCurrentUser, useCurrentBranch } from '../../store/slices/authSlice';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import * as salesApi from '../../services/api/sales.api';
+
+// CONFIGURACIÓN FISCAL DEL EMISOR
+// Si es true, el sistema se comportará como Monotributista (Emite C)
+// Si es false, se comportará como Responsable Inscripto (Emite A o B)
+const IS_MONOTRIBUTO = true;
 
 // Datos iniciales (se mantendrán para el funcionamiento offline)
 const INITIAL_PRODUCTS = [
@@ -78,6 +82,7 @@ export default function Billing() {
 
   // Configuración de factura
   const [invoiceType, setInvoiceType] = useState('X');
+  const [manualInvoiceType, setManualInvoiceType] = useState(false); // Bandera para control manual
   const [posNumber] = useState(1);
   const [counters, setCounters] = useState({ afip: 1024, x: 50, presupuesto: 200 });
 
@@ -156,11 +161,20 @@ export default function Billing() {
 
   // LÓGICA AUTOMÁTICA DE TIPO DE COMPROBANTE
   useEffect(() => {
+    // Si el usuario cambió manualmente el tipo, no lo sobrescribimos automáticamente
+    if (manualInvoiceType) return;
+
     if (payments.length === 0) {
-      if (selectedClient.condition === 'RI') {
-        setInvoiceType('A');
-      } else {
+      if (IS_MONOTRIBUTO) {
+        // Si es monotributo, por defecto X hasta que haya un pago fiscal o decisión
         setInvoiceType('X');
+      } else {
+        // Responsable Inscripto
+        if (selectedClient.condition === 'RI') {
+          setInvoiceType('A');
+        } else {
+          setInvoiceType('X');
+        }
       }
       return;
     }
@@ -168,12 +182,22 @@ export default function Billing() {
     const hasNonCash = payments.some((p) => p.method !== 'Efectivo');
 
     if (hasNonCash) {
-      const fiscalType = selectedClient.condition === 'RI' ? 'A' : 'B';
+      let fiscalType;
+      
+      if (IS_MONOTRIBUTO) {
+        // Monotributo emite C
+        fiscalType = 'C';
+      } else {
+        // RI emite A o B según cliente
+        fiscalType = selectedClient.condition === 'RI' ? 'A' : 'B';
+      }
+
       if (invoiceType !== fiscalType) {
         setInvoiceType(fiscalType);
-        toast(`Cambiado automáticamente a Factura ${fiscalType} por método de pago no efectivo`); 
+        toast(`Cambiado a Factura ${fiscalType} por método de pago fiscal`, { icon: 'ℹ️' });
       }
     } else {
+      // Solo efectivo, volvemos a X (si no es manual)
       if (invoiceType !== 'X') {
         setInvoiceType('X');
         toast('Cambiado automáticamente a Factura X (todos los pagos en efectivo)', {
@@ -181,7 +205,13 @@ export default function Billing() {
         });
       }
     }
-  }, [payments, selectedClient.condition]);
+  }, [payments, selectedClient.condition, manualInvoiceType]);
+
+  // Handler para cambio manual de tipo de factura
+  const handleManualInvoiceTypeChange = (type) => {
+    setInvoiceType(type);
+    setManualInvoiceType(true); // Activa la bandera para detener cambios automáticos
+  };
 
   // SIMULACIÓN DE NOTIFICACIONES DE MERCADO PAGO
   useEffect(() => {
@@ -227,10 +257,15 @@ export default function Billing() {
     setSelectedClient(client);
     setClientSearch('');
     setShowClientList(false);
+    setManualInvoiceType(false); // Reseteamos manual al cambiar cliente para recalcular sugerencia
 
     if (payments.length === 0) {
-      if (client.condition === 'RI') setInvoiceType('A');
-      else setInvoiceType('X');
+      if (IS_MONOTRIBUTO) {
+        setInvoiceType('X'); // Monotributo no emite A
+      } else {
+        if (client.condition === 'RI') setInvoiceType('A');
+        else setInvoiceType('X');
+      }
     }
 
     setTimeout(() => prodInputRef.current?.focus(), 100);
@@ -371,8 +406,7 @@ export default function Billing() {
     }
 
     if (invoiceType === 'X' && payments.some((p) => p.method !== 'Efectivo')) {
-      toast.error('⚠️ No se puede emitir Factura X con pagos no efectivo');
-      return;
+      toast.error('⚠️ Advertencia: Estás emitiendo Factura X con pagos electrónicos. Esto podría ser incorrecto fiscalmente.');
     }
 
     setIsProcessing(true);
@@ -384,8 +418,8 @@ export default function Billing() {
         pointOfSale: posNumber,
         invoiceNumber: currentNumber,
         clientId: selectedClient.id !== 'C0' ? selectedClient.id : null,
-        userId: user?.id,
-        branchId: branch?.id,
+        userId: user?.id || 'user-default',
+        branchId: branch?.id || 'branch-default',
         items: items.map(item => ({
           id: item.id,
           code: item.code,
@@ -405,12 +439,12 @@ export default function Billing() {
         discount: 0,
         tax: invoiceType === 'A' ? totals.totalIva : 0,
         total: totals.total,
-        // CAE solo para facturas fiscales (simulado)
         cae: ['A', 'B', 'C'].includes(invoiceType) ? generateMockCAE() : null,
         caeExpiration: ['A', 'B', 'C'].includes(invoiceType) 
           ? new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString() // 10 días
           : null,
-        cashSessionId: null, // TODO: Obtener de la sesión de caja actual
+        cashSessionId: null, 
+        notes: `Generado automáticamente. Tipo: ${invoiceType}`,
       };
 
       console.log('📤 Enviando venta a la base de datos:', saleData);
@@ -465,6 +499,7 @@ export default function Billing() {
     setSelectedClient(CONSUMIDOR_FINAL);
     setSuccessData(null);
     setInvoiceType('X');
+    setManualInvoiceType(false);
     setProdSearch('');
     setEntryItem({
       id: null,
@@ -479,7 +514,7 @@ export default function Billing() {
     });
   };
 
-  // VISTA DE ÉXITO
+  // VISTA DE ÉXITO (Ticket/Factura)
   if (successData) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col items-center p-4 overflow-y-auto">
@@ -550,8 +585,8 @@ export default function Billing() {
           <div className="flex-1 bg-slate-200 p-8 overflow-y-auto flex justify-center">
             <div className="bg-white rounded-lg shadow-lg p-8 max-w-2xl w-full">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold mb-2">MI NEGOCIO S.A.</h2>
-                <p className="text-sm text-gray-600">IVA Responsable Inscripto</p>
+                <h2 className="text-2xl font-bold mb-2">MI NEGOCIO {IS_MONOTRIBUTO ? '(Monotributo)' : 'S.A.'}</h2>
+                <p className="text-sm text-gray-600">{IS_MONOTRIBUTO ? 'Responsable Monotributo' : 'IVA Responsable Inscripto'}</p>
                 <div className="my-4 py-2 border-y">
                   <p className="font-bold text-lg">
                     {successData.type === 'P'
@@ -650,22 +685,22 @@ export default function Billing() {
             <div className="relative group">
               <select
                 value={invoiceType}
-                onChange={(e) => setInvoiceType(e.target.value)}
+                onChange={(e) => handleManualInvoiceTypeChange(e.target.value)}
                 className={`appearance-none font-bold text-xl text-white text-center w-14 h-12 rounded cursor-pointer outline-none ${
                   invoiceType === 'A'
                     ? 'bg-purple-600'
                     : invoiceType === 'B'
                     ? 'bg-blue-600'
+                    : invoiceType === 'C'
+                    ? 'bg-teal-600'
                     : invoiceType === 'X'
                     ? 'bg-slate-600'
-                    : invoiceType === 'P'
-                    ? 'bg-orange-500'
-                    : 'bg-teal-600'
+                    : 'bg-orange-500'
                 }`}
               >
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
+                {!IS_MONOTRIBUTO && <option value="A">A</option>}
+                {!IS_MONOTRIBUTO && <option value="B">B</option>}
+                {IS_MONOTRIBUTO && <option value="C">C</option>}
                 <option value="X">X</option>
                 <option value="P">P</option>
               </select>
@@ -1062,18 +1097,32 @@ export default function Billing() {
                 </span>
               </div>
 
-              {/* Tipo de comprobante */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-3">
-                <FileText className="text-blue-600" size={20} />
-                <div className="flex-1">
-                  <p className="text-xs text-blue-700 font-bold">
-                    Tipo de Comprobante
-                  </p>
-                  <p className="text-sm font-bold text-blue-900">
-                    Factura {invoiceType} -{' '}
-                    {invoiceType === 'X' ? 'No Fiscal' : 'Fiscal'}
-                  </p>
+              {/* Tipo de comprobante (SELECTOR MANUAL EN MODAL) */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-3 justify-between">
+                <div className="flex items-center gap-3">
+                  <FileText className="text-blue-600" size={20} />
+                  <div>
+                    <p className="text-xs text-blue-700 font-bold">
+                      Tipo de Comprobante
+                    </p>
+                    <p className="text-sm font-bold text-blue-900">
+                      {invoiceType === 'X' ? 'Comprobante No Fiscal (X)' : `Factura ${invoiceType}`}
+                    </p>
+                  </div>
                 </div>
+                
+                {/* Selector de tipo */}
+                <select
+                  value={invoiceType}
+                  onChange={(e) => handleManualInvoiceTypeChange(e.target.value)}
+                  className="bg-white border border-blue-300 text-blue-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 font-bold outline-none cursor-pointer"
+                >
+                  {!IS_MONOTRIBUTO && <option value="A">Factura A</option>}
+                  {!IS_MONOTRIBUTO && <option value="B">Factura B</option>}
+                  {IS_MONOTRIBUTO && <option value="C">Factura C</option>}
+                  <option value="X">Factura X</option>
+                  <option value="P">Presupuesto</option>
+                </select>
               </div>
 
               {/* Formulario de pago */}

@@ -1,5 +1,3 @@
-// src/lib/supabase.js - VERSIÓN CORREGIDA
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -11,10 +9,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Variables de entorno requeridas:');
   console.error('- VITE_SUPABASE_URL:', supabaseUrl ? '✓' : '✗');
   console.error('- VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? '✓' : '✗');
-  console.warn('⚠️ La aplicación funcionará en MODO OFFLINE');
+  console.warn('⚠️ La aplicación funcionará en MODO OFFLINE. Verifica tu archivo .env');
 }
 
-// Cliente de Supabase (con valores por defecto para desarrollo)
+// Cliente de Supabase
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder-key',
@@ -38,7 +36,8 @@ export const supabase = createClient(
 // Verificar si Supabase está disponible
 export const isSupabaseConfigured = () => {
   return !!(supabaseUrl && supabaseAnonKey && 
-    supabaseUrl !== 'https://placeholder.supabase.co');
+    supabaseUrl !== 'https://placeholder.supabase.co' &&
+    supabaseAnonKey !== 'placeholder-key');
 };
 
 /**
@@ -49,7 +48,6 @@ export const isSupabaseConfigured = () => {
 
 export const createPaymentNotificationChannel = (branchId, onPaymentConfirmed) => {
   if (!isSupabaseConfigured()) {
-    console.warn('⚠️ Supabase no configurado - Canal de pagos no disponible');
     return null;
   }
 
@@ -181,61 +179,6 @@ export const checkPaymentStatus = async (paymentId) => {
   }
 };
 
-export const checkMultiplePayments = async (paymentIds) => {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: 'Supabase no configurado' };
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('payment_notifications')
-      .select('*')
-      .in('payment_id', paymentIds)
-      .eq('status', 'approved')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    return { success: true, data };
-  } catch (error) {
-    console.error('❌ Error verificando pagos:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * ===========================================
- * FUNCIONES DE ALERTAS DE STOCK
- * ===========================================
- */
-
-export const createStockAlertChannel = (branchId, onStockAlert) => {
-  if (!isSupabaseConfigured()) {
-    console.warn('⚠️ Supabase no configurado - Canal de stock no disponible');
-    return null;
-  }
-
-  const channel = supabase.channel(`stock-alerts:${branchId}`);
-
-  channel
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'stock_alerts',
-        filter: `branch_id=eq.${branchId}`,
-      },
-      (payload) => {
-        console.log('📦 Alerta de stock recibida:', payload.new);
-        onStockAlert(payload.new);
-      }
-    )
-    .subscribe();
-
-  return channel;
-};
-
 /**
  * ===========================================
  * UTILIDADES
@@ -244,45 +187,21 @@ export const createStockAlertChannel = (branchId, onStockAlert) => {
 
 export const checkConnection = async () => {
   if (!isSupabaseConfigured()) {
-    console.warn('⚠️ Supabase no configurado');
     return { success: false, error: 'Supabase no configurado' };
   }
 
   try {
-    const { data, error } = await supabase.from('users').select('count').single();
+    // Intentar una consulta muy simple para verificar conectividad
+    const { error } = await supabase.from('users').select('count').limit(1).single();
+    
+    // PGRST116 es "no rows returned", lo cual significa que la conexión funcionó pero no hay datos (tabla vacía o RLS), lo cual es OK
     if (error && error.code !== 'PGRST116') throw error;
     
-    console.log('✅ Conexión a Supabase OK');
     return { success: true };
   } catch (error) {
     console.error('❌ Error de conexión a Supabase:', error);
     return { success: false, error: error.message };
   }
 };
-
-export const getCurrentUser = async () => {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: 'Supabase no configurado' };
-  }
-
-  try {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error) throw error;
-    return { success: true, user };
-  } catch (error) {
-    console.error('❌ Error obteniendo usuario:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// Log inicial
-if (isSupabaseConfigured()) {
-  console.log('✅ Supabase configurado correctamente');
-  console.log('📡 URL:', supabaseUrl);
-} else {
-  console.warn('⚠️ Supabase NO configurado - Modo offline');
-  console.info('💡 Para habilitar Supabase, configura las variables de entorno:');
-  console.info('   VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY');
-}
 
 export default supabase;

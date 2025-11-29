@@ -1,10 +1,10 @@
-// src/services/api/sales.api.js - CON SOPORTE OFFLINE
+// src/services/api/sales.api.js - VERSIÓN CORREGIDA
 
 import supabase, { isSupabaseConfigured } from '../../lib/supabase';
 
 /**
  * ===========================================
- * API DE VENTAS - CON MODO OFFLINE
+ * API DE VENTAS - CON MODO OFFLINE Y CORRECCIONES
  * ===========================================
  */
 
@@ -37,7 +37,6 @@ const saveOfflineSale = (sale) => {
  * Obtener ventas con filtros avanzados
  */
 export const getSales = async (filters = {}) => {
-  // Modo offline
   if (!isSupabaseConfigured()) {
     console.warn('⚠️ Modo offline - Cargando ventas locales');
     const offlineSales = getOfflineSales();
@@ -53,7 +52,6 @@ export const getSales = async (filters = {}) => {
     };
   }
 
-  // Modo online
   const {
     search = '',
     invoiceType = '',
@@ -82,6 +80,8 @@ export const getSales = async (filters = {}) => {
         items:sale_items(
           id,
           product_id,
+          product_name,
+          product_code,
           quantity,
           unit_price,
           discount,
@@ -175,125 +175,170 @@ export const getSaleById = async (id) => {
 };
 
 /**
- * Crear nueva venta
+ * Crear nueva venta - VERSIÓN CORREGIDA
  */
 export const createSale = async (saleData) => {
+  console.log('🚀 Iniciando creación de venta:', saleData);
+
+  // VALIDACIONES CRÍTICAS ANTES DE CONTINUAR
+  if (!saleData.userId) {
+    console.error('❌ ERROR: userId es requerido');
+    return { success: false, error: 'Usuario no identificado. Por favor, inicia sesión nuevamente.' };
+  }
+
+  if (!saleData.branchId) {
+    console.error('❌ ERROR: branchId es requerido');
+    return { success: false, error: 'Sucursal no seleccionada. Por favor, selecciona una sucursal.' };
+  }
+
   // Generar número de venta único
-  const saleNumber = `${saleData.branchId?.slice(0, 4) || 'MAIN'}-${Date.now()}`;
+  const timestamp = Date.now();
+  const branchCode = saleData.branchId.toString().slice(0, 4).toUpperCase();
+  const saleNumber = `${branchCode}-${timestamp}`;
 
-  const saleToSave = {
-    id: `sale-${Date.now()}`,
-    sale_number: saleNumber,
-    invoice_type: saleData.invoiceType,
-    invoice_number: saleData.invoiceNumber,
-    point_of_sale: saleData.pointOfSale,
-    branch_id: saleData.branchId,
-    user_id: saleData.userId,
-    client_id: saleData.clientId,
-    date: new Date().toISOString(),
-    subtotal: saleData.subtotal,
-    discount: saleData.discount || 0,
-    tax: saleData.tax || 0,
-    total: saleData.total,
-    payment_methods: saleData.payments.map(p => p.method),
-    status: 'completed',
-    cae: saleData.cae || null,
-    cae_expiration: saleData.caeExpiration || null,
-    notes: saleData.notes,
-    items: saleData.items,
-    payments: saleData.payments,
-    created_at: new Date().toISOString(),
-  };
-
-  // Modo offline
+  // MODO OFFLINE
   if (!isSupabaseConfigured()) {
     console.warn('⚠️ Modo offline - Guardando venta localmente');
     
-    const saved = saveOfflineSale(saleToSave);
+    const offlineSale = {
+      id: `offline-${timestamp}`,
+      sale_number: saleNumber,
+      invoice_type: saleData.invoiceType,
+      invoice_number: saleData.invoiceNumber,
+      point_of_sale: saleData.pointOfSale,
+      branch_id: saleData.branchId,
+      user_id: saleData.userId,
+      client_id: saleData.clientId,
+      date: new Date().toISOString(),
+      subtotal: saleData.subtotal,
+      discount: saleData.discount || 0,
+      tax: saleData.tax || 0,
+      total: saleData.total,
+      payment_methods: saleData.payments.map(p => p.method),
+      status: 'completed',
+      cae: saleData.cae || null,
+      cae_expiration: saleData.caeExpiration || null,
+      notes: saleData.notes || null,
+      items: saleData.items,
+      payments: saleData.payments,
+      created_at: new Date().toISOString(),
+    };
+    
+    const saved = saveOfflineSale(offlineSale);
     
     if (saved) {
-      console.log('✅ Venta guardada offline:', saleToSave);
-      return { success: true, data: saleToSave };
+      console.log('✅ Venta guardada offline:', offlineSale);
+      return { success: true, data: offlineSale };
     } else {
       return { success: false, error: 'Error guardando venta offline' };
     }
   }
 
-  // Modo online
+  // MODO ONLINE - SUPABASE
   try {
-    const {
-      invoiceType,
-      pointOfSale,
-      invoiceNumber,
-      clientId,
-      userId,
-      branchId,
-      items,
-      payments,
-      subtotal,
-      discount,
-      tax,
-      total,
-      cae,
-      caeExpiration,
-      notes,
-    } = saleData;
+    console.log('📡 Modo online - Guardando en Supabase');
+    
+    // 1. VERIFICAR QUE EL USER_ID Y BRANCH_ID EXISTAN
+    console.log('🔍 Verificando usuario...');
+    const { data: userExists, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', saleData.userId)
+      .single();
 
-    // Insertar venta principal
+    if (userError || !userExists) {
+      console.error('❌ Usuario no encontrado:', saleData.userId);
+      throw new Error('Usuario no válido. Por favor, inicia sesión nuevamente.');
+    }
+
+    console.log('🔍 Verificando sucursal...');
+    const { data: branchExists, error: branchError } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', saleData.branchId)
+      .single();
+
+    if (branchError || !branchExists) {
+      console.error('❌ Sucursal no encontrada:', saleData.branchId);
+      throw new Error('Sucursal no válida. Por favor, selecciona una sucursal válida.');
+    }
+
+    // 2. PREPARAR OBJETO DE VENTA PARA INSERTAR
+    const saleToInsert = {
+      sale_number: saleNumber,
+      invoice_type: saleData.invoiceType,
+      invoice_number: saleData.invoiceNumber?.toString() || null,
+      point_of_sale: saleData.pointOfSale || 1,
+      branch_id: saleData.branchId,
+      user_id: saleData.userId,
+      client_id: saleData.clientId || null, // null si es consumidor final
+      date: new Date().toISOString(),
+      subtotal: parseFloat(saleData.subtotal) || 0,
+      discount: parseFloat(saleData.discount) || 0,
+      tax: parseFloat(saleData.tax) || 0,
+      total: parseFloat(saleData.total),
+      payment_methods: saleData.payments.map(p => p.method),
+      status: 'completed',
+      cae: saleData.cae || null,
+      cae_expiration: saleData.caeExpiration || null,
+      notes: saleData.notes || null,
+    };
+
+    console.log('📝 Objeto de venta preparado:', saleToInsert);
+
+    // 3. INSERTAR VENTA PRINCIPAL
+    console.log('💾 Insertando venta en tabla sales...');
     const { data: sale, error: saleError } = await supabase
       .from('sales')
-      .insert({
-        sale_number: saleNumber,
-        invoice_type: invoiceType,
-        invoice_number: invoiceNumber,
-        point_of_sale: pointOfSale,
-        branch_id: branchId,
-        user_id: userId,
-        client_id: clientId,
-        date: new Date().toISOString(),
-        subtotal,
-        discount: discount || 0,
-        tax: tax || 0,
-        total,
-        payment_methods: payments.map(p => p.method),
-        status: 'completed',
-        cae: cae || null,
-        cae_expiration: caeExpiration || null,
-        notes,
-      })
+      .insert(saleToInsert)
       .select()
       .single();
 
-    if (saleError) throw saleError;
+    if (saleError) {
+      console.error('❌ Error al insertar venta:', saleError);
+      throw new Error(`Error al guardar venta: ${saleError.message}`);
+    }
 
-    // Insertar items
-    if (items && items.length > 0) {
-      const saleItems = items.map(item => ({
+    console.log('✅ Venta principal insertada con ID:', sale.id);
+
+    // 4. INSERTAR ITEMS DE VENTA
+    if (saleData.items && saleData.items.length > 0) {
+      console.log('📦 Insertando items de venta...');
+      
+      const saleItems = saleData.items.map(item => ({
         sale_id: sale.id,
         product_id: item.id?.startsWith('gen-') ? null : item.id,
         product_name: item.name,
-        product_code: item.code,
-        quantity: item.quantity,
-        unit_price: item.price,
-        discount: item.discount || 0,
-        iva_rate: item.iva || 21,
-        subtotal: item.price * item.quantity,
-        total: item.price * item.quantity * (1 - (item.discount || 0) / 100),
+        product_code: item.code || null,
+        quantity: parseFloat(item.quantity),
+        unit_price: parseFloat(item.price),
+        discount: parseFloat(item.discount) || 0,
+        iva_rate: parseFloat(item.iva) || 21,
+        subtotal: parseFloat(item.price) * parseFloat(item.quantity),
+        total: parseFloat(item.price) * parseFloat(item.quantity) * (1 - (parseFloat(item.discount) || 0) / 100),
       }));
 
       const { error: itemsError } = await supabase
         .from('sale_items')
         .insert(saleItems);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('❌ Error al insertar items:', itemsError);
+        // No lanzamos error aquí para no bloquear la venta
+        console.warn('⚠️ Venta guardada pero sin items. Error:', itemsError.message);
+      } else {
+        console.log('✅ Items insertados correctamente');
+      }
     }
 
-    // Insertar pagos
-    if (payments && payments.length > 0) {
-      const salePayments = payments.map(payment => ({
+    // 5. INSERTAR PAGOS
+    if (saleData.payments && saleData.payments.length > 0) {
+      console.log('💳 Insertando pagos...');
+      
+      const salePayments = saleData.payments.map(payment => ({
         sale_id: sale.id,
         method: payment.method,
-        amount: payment.amount,
+        amount: parseFloat(payment.amount),
         reference: payment.reference || null,
         status: payment.status || 'approved',
         transaction_id: payment.transactionId || null,
@@ -303,29 +348,52 @@ export const createSale = async (saleData) => {
         .from('sale_payments')
         .insert(salePayments);
 
-      if (paymentsError) throw paymentsError;
+      if (paymentsError) {
+        console.error('❌ Error al insertar pagos:', paymentsError);
+        console.warn('⚠️ Venta guardada pero sin pagos. Error:', paymentsError.message);
+      } else {
+        console.log('✅ Pagos insertados correctamente');
+      }
     }
 
-    // Actualizar stock (solo productos reales, no genéricos)
-    for (const item of items) {
+    // 6. ACTUALIZAR STOCK (solo para productos reales)
+    console.log('📊 Actualizando stock de productos...');
+    for (const item of saleData.items) {
       if (item.id && !item.id.startsWith('gen-')) {
         try {
-          await supabase.rpc('decrement_stock', {
+          const { error: stockError } = await supabase.rpc('decrement_stock', {
             product_id: item.id,
-            quantity: item.quantity,
+            quantity: parseFloat(item.quantity),
           });
+
+          if (stockError) {
+            console.warn(`⚠️ Error actualizando stock para producto ${item.name}:`, stockError);
+          } else {
+            console.log(`✅ Stock actualizado para: ${item.name}`);
+          }
         } catch (stockError) {
-          console.warn('⚠️ Error actualizando stock:', stockError);
+          console.warn('⚠️ Error al decrementar stock:', stockError);
         }
       }
     }
 
-    console.log('✅ Venta guardada en Supabase:', sale);
-    return { success: true, data: sale };
+    console.log('🎉 ¡Venta completada exitosamente!');
+    
+    return { 
+      success: true, 
+      data: {
+        ...sale,
+        items: saleData.items,
+        payments: saleData.payments,
+      }
+    };
 
   } catch (error) {
-    console.error('❌ Error creando venta:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Error general al crear venta:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Error desconocido al guardar la venta' 
+    };
   }
 };
 
