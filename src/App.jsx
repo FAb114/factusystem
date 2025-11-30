@@ -11,6 +11,11 @@ import CashOpening from './pages/auth/CashOpening';
 import Billing from './pages/billing/Billing';
 import SalesList from './pages/sales/SalesList';
 
+// Settings
+import Settings from './pages/settings/Settings';
+import UsersManagement from './pages/settings/Users';
+import BranchesManagement from './pages/settings/Branches';
+
 // Layout
 import DashboardLayout from './components/layout/DashboardLayout';
 
@@ -103,10 +108,18 @@ function App() {
                   <Routes>
                     <Route index element={<Dashboard />} />
                     
-                    {/* Aquí irán las rutas de los módulos */}
+                    {/* Módulos principales */}
                     <Route path="billing" element={<Billing />} />
-                    {/* <Route path="products" element={<Products />} /> */}
                     <Route path="sales" element={<SalesList />} />
+                    
+                    {/* Configuraciones */}
+                    <Route path="settings" element={<Settings />} />
+                    <Route path="settings/users" element={<UsersManagement />} />
+                    <Route path="settings/branches" element={<BranchesManagement />} />
+                    
+                    {/* Placeholder para otras rutas */}
+                    {/* <Route path="products" element={<Products />} /> */}
+                    {/* <Route path="clients" element={<Clients />} /> */}
                     {/* etc... */}
                   </Routes>
                 </DashboardLayout>
