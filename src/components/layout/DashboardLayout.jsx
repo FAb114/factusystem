@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, useCurrentUser, useCurrentBranch } from '../../store/slices/authSlice';
 import {
   Menu,
@@ -27,13 +27,14 @@ import {
 
 function DashboardLayout({ children }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { logout } = useAuthStore();
   const user = useCurrentUser();
   const branch = useCurrentBranch();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
-  // Menú de navegación
+  // Menú de navegación con rutas corregidas
   const menuItems = [
     { icon: Home, label: 'Dashboard', path: '/dashboard', color: 'text-blue-600' },
     { icon: FileText, label: 'Facturar', path: '/dashboard/billing', color: 'text-green-600', shortcut: 'F1' },
@@ -44,11 +45,11 @@ function DashboardLayout({ children }) {
     { icon: Users, label: 'Clientes', path: '/dashboard/clients', color: 'text-pink-600' },
     { icon: Gift, label: 'Gift Cards', path: '/dashboard/giftcards', color: 'text-rose-600' },
     { icon: Truck, label: 'Proveedores', path: '/dashboard/suppliers', color: 'text-yellow-600' },
-    { icon: UserCircle, label: 'Usuarios', path: '/dashboard/users', color: 'text-cyan-600' },
+    { icon: UserCircle, label: 'Usuarios', path: '/dashboard/settings/users', color: 'text-cyan-600' }, // CORREGIDO
     { icon: Calculator, label: 'Cuotificador', path: '/dashboard/calculator', color: 'text-teal-600' },
     { icon: BarChart3, label: 'Reportes', path: '/dashboard/reports', color: 'text-red-600' },
     { icon: FileCheck, label: 'Documentos', path: '/dashboard/documents', color: 'text-violet-600' },
-    { icon: Building2, label: 'Sucursales', path: '/dashboard/branches', color: 'text-amber-600' },
+    { icon: Building2, label: 'Sucursales', path: '/dashboard/settings/branches', color: 'text-amber-600' }, // CORREGIDO
     { icon: Settings, label: 'Configuración', path: '/dashboard/settings', color: 'text-gray-600' },
     { icon: HelpCircle, label: 'Ayuda', path: '/dashboard/help', color: 'text-blue-500' },
   ];
@@ -56,6 +57,14 @@ function DashboardLayout({ children }) {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  // Función para verificar si una ruta está activa
+  const isActiveRoute = (path) => {
+    if (path === '/dashboard') {
+      return location.pathname === '/dashboard';
+    }
+    return location.pathname.startsWith(path);
   };
 
   return (
@@ -95,36 +104,49 @@ function DashboardLayout({ children }) {
         {/* Navegación */}
         <nav className="flex-1 overflow-y-auto py-4 px-2">
           <div className="space-y-1">
-            {menuItems.map((item, index) => (
-              <button
-                key={index}
-                onClick={() => navigate(item.path)}
-                className={`w-full flex items-center ${
-                  sidebarOpen ? 'justify-start gap-3 px-3' : 'justify-center'
-                } py-2.5 rounded-lg hover:bg-gray-100 transition group relative`}
-                title={!sidebarOpen ? item.label : ''}
-              >
-                <item.icon className={`w-5 h-5 ${item.color}`} />
-                {sidebarOpen && (
-                  <>
-                    <span className="text-sm font-medium text-gray-700">
-                      {item.label}
-                    </span>
-                    {item.shortcut && (
-                      <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                        {item.shortcut}
+            {menuItems.map((item, index) => {
+              const isActive = isActiveRoute(item.path);
+              
+              return (
+                <button
+                  key={index}
+                  onClick={() => {
+                    console.log('Navegando a:', item.path);
+                    navigate(item.path);
+                  }}
+                  className={`w-full flex items-center ${
+                    sidebarOpen ? 'justify-start gap-3 px-3' : 'justify-center'
+                  } py-2.5 rounded-lg transition group relative ${
+                    isActive 
+                      ? 'bg-blue-50 text-blue-600' 
+                      : 'hover:bg-gray-100 text-gray-700'
+                  }`}
+                  title={!sidebarOpen ? item.label : ''}
+                >
+                  <item.icon className={`w-5 h-5 ${isActive ? item.color : 'text-gray-500'}`} />
+                  {sidebarOpen && (
+                    <>
+                      <span className={`text-sm font-medium ${
+                        isActive ? 'text-blue-700' : 'text-gray-700'
+                      }`}>
+                        {item.label}
                       </span>
-                    )}
-                  </>
-                )}
-                {/* Tooltip para sidebar colapsado */}
-                {!sidebarOpen && (
-                  <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-                    {item.label}
-                  </div>
-                )}
-              </button>
-            ))}
+                      {item.shortcut && (
+                        <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                          {item.shortcut}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {/* Tooltip para sidebar colapsado */}
+                  {!sidebarOpen && (
+                    <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-50">
+                      {item.label}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </nav>
 
@@ -190,22 +212,33 @@ function DashboardLayout({ children }) {
 
               {/* Dropdown */}
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                  <button
-                    onClick={() => navigate('/dashboard/settings')}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Configuración
-                  </button>
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Cerrar Sesión
-                  </button>
-                </div>
+                <>
+                  {/* Overlay para cerrar el menú */}
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setUserMenuOpen(false)}
+                  />
+                  
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        navigate('/dashboard/settings');
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Configuración
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
