@@ -1,6 +1,7 @@
-// src/services/api/sales.api.js - VERSIÓN CORREGIDA CON STORAGE FIJO
+// src/services/api/sales.api.js - VERSIÓN COMPLETA CORREGIDA
 
 import supabase, { isSupabaseConfigured } from '../../lib/supabase';
+import { useAuthStore } from '../../store/slices/authSlice';
 
 /**
  * ===========================================
@@ -9,7 +10,7 @@ import supabase, { isSupabaseConfigured } from '../../lib/supabase';
  */
 
 // ========================================
-// FUNCIONES DE STORAGE OFFLINE - CORREGIDAS
+// FUNCIONES DE STORAGE OFFLINE
 // ========================================
 
 const OFFLINE_STORAGE_KEY = 'factusystem_offline_sales';
@@ -37,8 +38,16 @@ const saveOfflineSale = (sale) => {
   }
 };
 
+// ========================================
+// FUNCIÓN AUXILIAR: VALIDAR UUID
+// ========================================
+const isValidUUID = (str) => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return str && uuidRegex.test(str);
+};
+
 /**
- * Crear nueva venta - VERSIÓN COMPLETAMENTE CORREGIDA
+ * Crear nueva venta - VERSIÓN CORREGIDA
  */
 export const createSale = async (saleData) => {
   console.log('🚀 Iniciando creación de venta:', saleData);
@@ -46,23 +55,48 @@ export const createSale = async (saleData) => {
   // ========================================
   // VALIDACIONES CRÍTICAS
   // ========================================
-  if (!saleData.userId) {
-    console.error('❌ ERROR: userId es requerido');
-    return { 
-      success: false, 
-      error: 'Usuario no identificado. Por favor, inicia sesión nuevamente.' 
-    };
+  
+  // Validar userId
+  let userId = saleData.userId;
+  if (!isValidUUID(userId)) {
+    console.warn('⚠️ user_id inválido, obteniendo del authStore');
+    const authState = useAuthStore.getState();
+    userId = authState.user?.id;
+    
+    if (!isValidUUID(userId)) {
+      console.error('❌ ERROR: user_id no válido');
+      return { 
+        success: false, 
+        error: 'Usuario no válido. Por favor, inicia sesión nuevamente.' 
+      };
+    }
   }
 
-  if (!saleData.branchId) {
-    console.error('❌ ERROR: branchId es requerido');
-    return { 
-      success: false, 
-      error: 'Sucursal no seleccionada. Por favor, selecciona una sucursal.' 
-    };
+  // Validar branchId
+  let branchId = saleData.branchId;
+  if (!isValidUUID(branchId)) {
+    console.warn('⚠️ branch_id inválido, obteniendo del authStore');
+    const authState = useAuthStore.getState();
+    branchId = authState.selectedBranch?.id;
+    
+    if (!isValidUUID(branchId)) {
+      console.error('❌ ERROR: branch_id no válido');
+      return { 
+        success: false, 
+        error: 'Sucursal no válida. Por favor, selecciona una sucursal.' 
+      };
+    }
   }
 
-  // Generar número de venta único
+  // Validar clientId
+  let clientId = saleData.clientId;
+  if (clientId && !isValidUUID(clientId)) {
+    console.warn('⚠️ client_id inválido, usando null');
+    clientId = null;
+  }
+
+  console.log('✅ IDs validados:', { userId, branchId, clientId });
+
   const timestamp = Date.now();
   const saleNumber = `SALE-${timestamp}`;
 
@@ -78,9 +112,9 @@ export const createSale = async (saleData) => {
       invoice_type: saleData.invoiceType,
       invoice_number: saleData.invoiceNumber,
       point_of_sale: saleData.pointOfSale || 1,
-      branch_id: saleData.branchId,
-      user_id: saleData.userId,
-      client_id: saleData.clientId || null,
+      branch_id: branchId,
+      user_id: userId,
+      client_id: clientId,
       date: new Date().toISOString(),
       subtotal: saleData.subtotal,
       discount: saleData.discount || 0,
@@ -105,7 +139,7 @@ export const createSale = async (saleData) => {
     } else {
       return { 
         success: false, 
-        error: 'Error guardando venta en modo offline. Verifica el almacenamiento local.' 
+        error: 'Error guardando venta en modo offline.' 
       };
     }
   }
@@ -116,15 +150,14 @@ export const createSale = async (saleData) => {
   try {
     console.log('📡 Modo online - Guardando en Supabase');
     
-    // 1. PREPARAR OBJETO DE VENTA
     const saleToInsert = {
       sale_number: saleNumber,
       invoice_type: saleData.invoiceType || 'X',
       invoice_number: saleData.invoiceNumber?.toString() || null,
       point_of_sale: parseInt(saleData.pointOfSale) || 1,
-      branch_id: saleData.branchId,
-      user_id: saleData.userId,
-      client_id: saleData.clientId || null,
+      branch_id: branchId,
+      user_id: userId,
+      client_id: clientId,
       date: new Date().toISOString(),
       subtotal: parseFloat(saleData.subtotal) || 0,
       discount: parseFloat(saleData.discount) || 0,
@@ -139,8 +172,6 @@ export const createSale = async (saleData) => {
 
     console.log('📝 Objeto de venta preparado:', saleToInsert);
 
-    // 2. INSERTAR VENTA PRINCIPAL
-    console.log('💾 Insertando venta en tabla sales...');
     const { data: sale, error: saleError } = await supabase
       .from('sales')
       .insert(saleToInsert)
@@ -150,7 +181,6 @@ export const createSale = async (saleData) => {
     if (saleError) {
       console.error('❌ Error al insertar venta:', saleError);
       
-      // Si el error es de permisos, guardar offline
       if (saleError.code === 'PGRST301' || saleError.code === '42501') {
         console.warn('⚠️ Sin permisos en Supabase, guardando offline...');
         const offlineSale = {
@@ -172,7 +202,7 @@ export const createSale = async (saleData) => {
 
     console.log('✅ Venta principal insertada con ID:', sale.id);
 
-    // 3. INSERTAR ITEMS DE VENTA
+    // Insertar items
     if (saleData.items && saleData.items.length > 0) {
       console.log('📦 Insertando items de venta...');
       
@@ -186,7 +216,8 @@ export const createSale = async (saleData) => {
         discount: parseFloat(item.discount) || 0,
         iva_rate: parseFloat(item.iva) || 21,
         subtotal: parseFloat(item.price) * parseFloat(item.quantity),
-        total: parseFloat(item.price) * parseFloat(item.quantity) * (1 - (parseFloat(item.discount) || 0) / 100),
+        total: parseFloat(item.price) * parseFloat(item.quantity) * 
+               (1 - (parseFloat(item.discount) || 0) / 100),
       }));
 
       const { error: itemsError } = await supabase
@@ -200,7 +231,7 @@ export const createSale = async (saleData) => {
       }
     }
 
-    // 4. INSERTAR PAGOS
+    // Insertar pagos
     if (saleData.payments && saleData.payments.length > 0) {
       console.log('💳 Insertando pagos...');
       
@@ -238,7 +269,6 @@ export const createSale = async (saleData) => {
   } catch (error) {
     console.error('❌ Error general al crear venta:', error);
     
-    // Intentar guardar offline como fallback
     console.warn('⚠️ Intentando guardar offline como respaldo...');
     const offlineSale = {
       id: `offline-${timestamp}`,
@@ -246,9 +276,9 @@ export const createSale = async (saleData) => {
       invoice_type: saleData.invoiceType,
       invoice_number: saleData.invoiceNumber,
       point_of_sale: saleData.pointOfSale || 1,
-      branch_id: saleData.branchId,
-      user_id: saleData.userId,
-      client_id: saleData.clientId || null,
+      branch_id: branchId,
+      user_id: userId,
+      client_id: clientId,
       date: new Date().toISOString(),
       subtotal: saleData.subtotal,
       discount: saleData.discount || 0,
@@ -333,6 +363,14 @@ export const getSales = async (filters = {}) => {
           subtotal,
           total,
           product:products(id, name, code, barcode)
+        ),
+        payments:sale_payments(
+          id,
+          method,
+          amount,
+          status,
+          reference,
+          transaction_id
         )
       `, { count: 'exact' });
 
@@ -377,7 +415,6 @@ export const getSales = async (filters = {}) => {
   } catch (error) {
     console.error('Error obteniendo ventas:', error);
     
-    // Fallback a ventas offline
     const offlineSales = getOfflineSales();
     return {
       success: true,
@@ -389,6 +426,63 @@ export const getSales = async (filters = {}) => {
       },
       warning: 'Mostrando solo ventas guardadas offline',
     };
+  }
+};
+
+/**
+ * Obtener venta por ID con todos sus detalles
+ */
+export const getSaleById = async (id) => {
+  if (!isSupabaseConfigured()) {
+    const offlineSales = getOfflineSales();
+    const sale = offlineSales.find(s => s.id === id);
+    return sale 
+      ? { success: true, data: sale }
+      : { success: false, error: 'Venta no encontrada' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('sales')
+      .select(`
+        *,
+        client:clients(id, name, document_number, cuit, iva_condition, address, city, province),
+        user:users(id, full_name, username, email),
+        branch:branches(id, name, code, address, phone, afip_pos_number),
+        items:sale_items(
+          id,
+          product_id,
+          product_name,
+          product_code,
+          quantity,
+          unit_price,
+          discount,
+          iva_rate,
+          subtotal,
+          total
+        ),
+        payments:sale_payments(
+          id,
+          method,
+          amount,
+          status,
+          reference,
+          transaction_id,
+          authorization_code,
+          card_last_digits,
+          card_brand,
+          installments
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error obteniendo venta:', error);
+    return { success: false, error: error.message };
   }
 };
 
@@ -465,13 +559,119 @@ export const getSalesStats = async (filters = {}) => {
   }
 };
 
-// Exportar otras funciones sin cambios
-export const getSaleById = async (id) => {
-  // ... código existente ...
+/**
+ * Obtener ventas del día
+ */
+export const getTodaySales = async (branchId = null) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  return getSales({
+    startDate: today.toISOString(),
+    branchId,
+    status: 'completed',
+  });
 };
 
+/**
+ * Anular venta
+ */
 export const cancelSale = async (id, reason, userId) => {
-  // ... código existente ...
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'No disponible offline' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('sales')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: userId,
+        cancellation_reason: reason,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error anulando venta:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Buscar ventas (autocompletado)
+ */
+export const searchSales = async (query, limit = 10) => {
+  if (!isSupabaseConfigured()) {
+    const offlineSales = getOfflineSales();
+    const filtered = offlineSales.filter(s => 
+      s.sale_number?.includes(query) || 
+      s.invoice_number?.includes(query)
+    ).slice(0, limit);
+    return { success: true, data: filtered };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('id, sale_number, invoice_type, invoice_number, total, date, status')
+      .or(`sale_number.ilike.%${query}%,invoice_number.ilike.%${query}%`)
+      .limit(limit);
+
+    if (error) throw error;
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error buscando ventas:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Obtener siguiente número de factura
+ */
+export const getNextInvoiceNumber = async (invoiceType, pointOfSale, branchId) => {
+  if (!isSupabaseConfigured()) {
+    return { success: true, data: { nextNumber: 1, posNumber: 1 } };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('get_next_invoice_number', {
+      p_branch_id: branchId,
+      p_invoice_type: invoiceType,
+    });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: {
+        nextNumber: data || 1,
+        posNumber: pointOfSale || 1,
+      },
+    };
+  } catch (error) {
+    console.error('Error obteniendo siguiente número:', error);
+    return { 
+      success: true, 
+      data: { nextNumber: 1, posNumber: pointOfSale || 1 }
+    };
+  }
+};
+
+/**
+ * Obtener resumen mensual
+ */
+export const getMonthlySummary = async (year, month, branchId = null) => {
+  const startDate = new Date(year, month - 1, 1).toISOString();
+  const endDate = new Date(year, month, 0, 23, 59, 59).toISOString();
+  
+  return getSalesStats({ startDate, endDate, branchId });
 };
 
 export default {
@@ -480,4 +680,8 @@ export default {
   createSale,
   cancelSale,
   getSalesStats,
+  getTodaySales,
+  searchSales,
+  getNextInvoiceNumber,
+  getMonthlySummary,
 };
