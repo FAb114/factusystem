@@ -74,6 +74,36 @@ export default function Billing() {
   const user = useCurrentUser();
   const branch = useCurrentBranch();
 
+  // ========================================
+  // 🔥 VERIFICACIÓN DE AUTENTICACIÓN
+  // ========================================
+  useEffect(() => {
+    console.log('🔐 Estado de autenticación en Billing:');
+    console.log('Usuario:', user);
+    console.log('Sucursal:', branch);
+
+    if (!user) {
+      console.error('❌ No hay usuario logueado');
+      toast.error('Debes iniciar sesión');
+      navigate('/login');
+      return;
+    }
+
+    if (!branch) {
+      console.error('❌ No hay sucursal seleccionada');
+      toast.error('Debes seleccionar una sucursal');
+      navigate('/branch-selector');
+      return;
+    }
+
+    console.log('✅ Autenticación OK:', {
+      userId: user.id,
+      userName: user.fullName,
+      branchId: branch.id,
+      branchName: branch.name,
+    });
+  }, [user, branch, navigate]);
+
   // Estados principales
   const [items, setItems] = useState([]);
   const [selectedClient, setSelectedClient] = useState(CONSUMIDOR_FINAL);
