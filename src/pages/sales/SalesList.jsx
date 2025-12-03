@@ -1,4 +1,4 @@
-// src/pages/sales/SalesList.jsx - VERSIÓN CON STATS CORREGIDAS
+// src/pages/sales/SalesList.jsx - VERSIÓN CON SOPORTE OFFLINE MEJORADO
 
 import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
@@ -13,12 +13,13 @@ import {
   Receipt,
   FileText,
   X,
+  AlertCircle,
 } from 'lucide-react';
 
 import { useCurrentBranch } from '../../store/slices/authSlice';
 import { useSales, useSalesStats } from '../../hooks/useSales';
 import { formatCurrency, formatDateTime, formatDate } from '../../utils/formatters';
-import supabase, { isSupabaseConfigured } from '../../lib/supabase';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
 
 const INVOICE_TYPE_COLORS = {
@@ -27,6 +28,19 @@ const INVOICE_TYPE_COLORS = {
   C: 'bg-teal-100 text-teal-800 border-teal-300',
   X: 'bg-slate-100 text-slate-800 border-slate-300',
   P: 'bg-orange-100 text-orange-800 border-orange-300',
+};
+
+// ========================================
+// FUNCIONES PARA LEER DATOS OFFLINE
+// ========================================
+const getOfflineSales = () => {
+  try {
+    const data = localStorage.getItem('factusystem_offline_sales');
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Error leyendo ventas offline:', error);
+    return [];
+  }
 };
 
 export default function SalesList() {
@@ -41,55 +55,94 @@ export default function SalesList() {
   });
 
   const [selectedSale, setSelectedSale] = useState(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(!isSupabaseConfigured());
+  const [offlineSales, setOfflineSales] = useState([]);
 
-  // Queries
-  const { data: salesData, isLoading, refetch } = useSales(filters);
+  // ========================================
+  // CARGAR VENTAS OFFLINE AL MONTAR
+  // ========================================
+  useEffect(() => {
+    console.log('🔍 Verificando modo de operación...');
+    const offline = !isSupabaseConfigured();
+    setIsOfflineMode(offline);
+    
+    if (offline) {
+      console.log('📦 MODO OFFLINE - Cargando ventas desde localStorage');
+      const sales = getOfflineSales();
+      console.log('✅ Ventas offline cargadas:', sales.length);
+      console.table(sales);
+      setOfflineSales(sales);
+    } else {
+      console.log('🌐 MODO ONLINE - Usando React Query');
+    }
+  }, []);
+
+  // ========================================
+  // QUERIES (solo si está online)
+  // ========================================
+  const { data: salesData, isLoading, refetch } = useSales(filters, {
+    enabled: !isOfflineMode,
+  });
+  
   const { data: statsData, refetch: refetchStats } = useSalesStats({
     branchId: branch?.id,
     startDate: filters.startDate,
     endDate: filters.endDate,
+  }, {
+    enabled: !isOfflineMode,
   });
 
   // ========================================
-  // REALTIME SOLO SI SUPABASE ESTÁ CONFIGURADO
+  // USAR DATOS OFFLINE O ONLINE
   // ========================================
-  useEffect(() => {
-    if (!isSupabaseConfigured()) {
-      console.log('⚠️ Supabase no configurado, Realtime desactivado');
-      return;
+  const sales = useMemo(() => {
+    if (isOfflineMode) {
+      console.log('📋 Usando ventas offline para la lista:', offlineSales.length);
+      return offlineSales;
     }
-
-    console.log('📡 Suscribiendo a cambios en ventas...');
-    
-    const channel = supabase
-      .channel('sales_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'sales' },
-        (payload) => {
-          console.log('🔔 Cambio detectado:', payload);
-          refetch();
-          refetchStats();
-          toast('Lista actualizada', { icon: '🔄', position: 'bottom-right' });
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Realtime conectado');
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [refetch, refetchStats]);
+    return salesData?.sales || [];
+  }, [isOfflineMode, offlineSales, salesData]);
 
   // ========================================
-  // CALCULAR ESTADÍSTICAS - MEJORADO
+  // CALCULAR ESTADÍSTICAS
   // ========================================
   const stats = useMemo(() => {
-    console.log('📊 Calculando estadísticas con:', statsData);
+    console.log('📊 Calculando estadísticas...');
+    console.log('- Modo offline:', isOfflineMode);
+    console.log('- Sales data:', sales.length, 'ventas');
+    
+    if (isOfflineMode) {
+      // Calcular desde ventas offline
+      const totalSales = sales.length;
+      const totalRevenue = sales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
+      const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+      
+      const byInvoiceType = {};
+      sales.forEach(sale => {
+        const type = sale.invoice_type || 'X';
+        if (!byInvoiceType[type]) {
+          byInvoiceType[type] = { count: 0, total: 0 };
+        }
+        byInvoiceType[type].count++;
+        byInvoiceType[type].total += parseFloat(sale.total) || 0;
+      });
 
+      console.log('✅ Estadísticas offline calculadas:', {
+        totalSales,
+        totalRevenue,
+        averageTicket,
+        byInvoiceType,
+      });
+
+      return {
+        totalSales,
+        totalRevenue,
+        averageTicket,
+        porTipo: byInvoiceType,
+      };
+    }
+
+    // Usar stats de online
     if (!statsData) {
       return {
         totalVentas: 0,
@@ -105,7 +158,7 @@ export default function SalesList() {
       ticketPromedio: statsData.averageTicket || 0,
       porTipo: statsData.byInvoiceType || {},
     };
-  }, [statsData]);
+  }, [isOfflineMode, sales, statsData]);
 
   console.log('📊 Estadísticas finales:', stats);
 
@@ -117,11 +170,21 @@ export default function SalesList() {
   };
 
   const handleViewSale = (sale) => {
+    console.log('👁️ Viendo venta:', sale);
     setSelectedSale(sale);
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleRefresh = () => {
+    if (isOfflineMode) {
+      console.log('🔄 Recargando ventas offline...');
+      const sales = getOfflineSales();
+      setOfflineSales(sales);
+      toast.success('Lista actualizada');
+    } else {
+      refetch();
+      refetchStats();
+      toast.success('Lista actualizada');
+    }
   };
 
   const getClientName = (sale) => {
@@ -137,6 +200,23 @@ export default function SalesList() {
     <div className="h-full flex flex-col bg-slate-50">
       {/* Header con estadísticas */}
       <div className="bg-white border-b px-6 py-4">
+        {/* Indicador de modo offline */}
+        {isOfflineMode && (
+          <div className="mb-4 bg-orange-50 border-l-4 border-orange-400 p-3 rounded-r-lg">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-orange-600" />
+              <div>
+                <p className="text-sm font-bold text-orange-800">
+                  Modo Offline
+                </p>
+                <p className="text-xs text-orange-700">
+                  Mostrando ventas guardadas localmente. Las ventas se sincronizarán cuando configures Supabase.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Ventas</h1>
@@ -150,11 +230,7 @@ export default function SalesList() {
             <Button
               variant="outline"
               icon={RefreshCw}
-              onClick={() => {
-                refetch();
-                refetchStats();
-                toast.success('Lista actualizada');
-              }}
+              onClick={handleRefresh}
             >
               Actualizar
             </Button>
@@ -167,7 +243,9 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-100 text-sm font-medium">Total Ventas</p>
-                <p className="text-3xl font-bold">{stats.totalVentas}</p>
+                <p className="text-3xl font-bold">
+                  {isOfflineMode ? stats.totalSales : stats.totalVentas}
+                </p>
               </div>
               <Receipt className="w-10 h-10 text-blue-200" />
             </div>
@@ -177,7 +255,9 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-100 text-sm font-medium">Recaudación</p>
-                <p className="text-3xl font-bold">{formatCurrency(stats.totalRecaudado)}</p>
+                <p className="text-3xl font-bold">
+                  {formatCurrency(isOfflineMode ? stats.totalRevenue : stats.totalRecaudado)}
+                </p>
               </div>
               <DollarSign className="w-10 h-10 text-green-200" />
             </div>
@@ -187,7 +267,9 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-100 text-sm font-medium">Ticket Promedio</p>
-                <p className="text-3xl font-bold">{formatCurrency(stats.ticketPromedio)}</p>
+                <p className="text-3xl font-bold">
+                  {formatCurrency(isOfflineMode ? stats.averageTicket : stats.ticketPromedio)}
+                </p>
               </div>
               <TrendingUp className="w-10 h-10 text-purple-200" />
             </div>
@@ -248,14 +330,17 @@ export default function SalesList() {
 
       {/* Tabla de ventas */}
       <div className="flex-1 overflow-auto">
-        {isLoading ? (
+        {isLoading && !isOfflineMode ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
-        ) : !salesData?.sales || salesData.sales.length === 0 ? (
+        ) : sales.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
             <Receipt className="w-16 h-16 mb-4 text-slate-300" />
             <p className="text-lg font-medium">No se encontraron ventas</p>
+            {isOfflineMode && (
+              <p className="text-sm mt-2">Realiza una venta para que aparezca aquí</p>
+            )}
           </div>
         ) : (
           <table className="w-full">
@@ -269,11 +354,15 @@ export default function SalesList() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {salesData.sales.map((sale) => (
+              {sales.map((sale) => (
                 <tr key={sale.id} className="hover:bg-blue-50/50 transition">
                   <td className="px-4 py-3">
-                    <div className="text-sm font-medium text-slate-900">{formatDate(sale.date)}</div>
-                    <div className="text-xs text-slate-500">{format(new Date(sale.date), 'HH:mm')}</div>
+                    <div className="text-sm font-medium text-slate-900">
+                      {formatDate(sale.date || sale.created_at)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {format(new Date(sale.date || sale.created_at), 'HH:mm')}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -307,7 +396,7 @@ export default function SalesList() {
 
       {/* Modal Detalle */}
       {selectedSale && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 no-print">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
             <div className="p-4 border-b flex justify-between items-center bg-slate-50">
               <h2 className="text-lg font-bold">Detalle de Venta</h2>
@@ -317,7 +406,7 @@ export default function SalesList() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-8">
-              <div className="bg-white shadow-lg p-8 rounded-lg printable-content">
+              <div className="bg-white shadow-lg p-8 rounded-lg">
                 <div className="text-center mb-6">
                   <h1 className="text-2xl font-bold mb-2">MI NEGOCIO</h1>
                   <div className="py-2 border-y">
@@ -325,7 +414,7 @@ export default function SalesList() {
                     <p className="text-sm">
                       N°: {String(selectedSale.point_of_sale || 1).padStart(4, '0')}-{String(selectedSale.invoice_number).padStart(8, '0')}
                     </p>
-                    <p className="text-xs text-gray-500">{formatDateTime(selectedSale.date)}</p>
+                    <p className="text-xs text-gray-500">{formatDateTime(selectedSale.date || selectedSale.created_at)}</p>
                   </div>
                 </div>
 
@@ -345,10 +434,10 @@ export default function SalesList() {
                   <tbody>
                     {(selectedSale.items || []).map((item, i) => (
                       <tr key={i} className="border-b">
-                        <td className="p-2">{item.product_name}</td>
+                        <td className="p-2">{item.product_name || item.name}</td>
                         <td className="text-center p-2">{item.quantity}</td>
-                        <td className="text-right p-2">{formatCurrency(item.unit_price)}</td>
-                        <td className="text-right p-2 font-bold">{formatCurrency(item.total)}</td>
+                        <td className="text-right p-2">{formatCurrency(item.unit_price || item.price)}</td>
+                        <td className="text-right p-2 font-bold">{formatCurrency(item.total || (item.price * item.quantity))}</td>
                       </tr>
                     ))}
                   </tbody>

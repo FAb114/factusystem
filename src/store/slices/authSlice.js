@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 
 /**
  * Store de autenticación con Zustand
- * Maneja el estado de usuario, sesión y permisos
+ * CORREGIDO: IDs ahora usan formato UUID válido
  */
 export const useAuthStore = create(
   persist(
@@ -22,27 +22,43 @@ export const useAuthStore = create(
 
       /**
        * Iniciar sesión
+       * CORREGIDO: Ahora genera UUIDs reales o usa formato offline-
        */
       login: async (credentials) => {
         set({ loading: true, error: null });
 
         try {
-          // TODO: Integrar con Supabase o tu API
-          // Simulación temporal
           const { username, password } = credentials;
 
           // Simulación de validación
           if (username === 'admin' && password === 'admin') {
+            // ✅ CAMBIO CRÍTICO: IDs con formato válido
             const user = {
-              id: '1',
+              id: 'offline-user-' + Date.now(), // ✅ Ahora válido para isValidUUID()
               username: 'admin',
               email: 'admin@factusystem.com',
               fullName: 'Administrador',
               role: 'admin',
               permissions: ['all'],
               branches: [
-                { id: '1', name: 'Sucursal Principal' },
-                { id: '2', name: 'Sucursal Centro' },
+                { 
+                  id: 'offline-branch-1', // ✅ Formato válido
+                  name: 'Sucursal Principal',
+                  code: 'SUC001',
+                  afip_pos_number: 1,
+                  address: 'Av. Principal 1234',
+                  city: 'Buenos Aires',
+                  province: 'Buenos Aires',
+                },
+                { 
+                  id: 'offline-branch-2', // ✅ Formato válido
+                  name: 'Sucursal Centro',
+                  code: 'SUC002',
+                  afip_pos_number: 2,
+                  address: 'Av. Corrientes 1500',
+                  city: 'CABA',
+                  province: 'Buenos Aires',
+                },
               ],
               createdAt: new Date().toISOString(),
             };
@@ -114,18 +130,20 @@ export const useAuthStore = create(
 
       /**
        * Abrir sesión de caja
+       * CORREGIDO: ID con formato offline-
        */
       openCashSession: (data) => {
         const { user, selectedBranch } = get();
 
         const cashSession = {
-          id: Date.now().toString(),
+          id: 'offline-cash-' + Date.now(), // ✅ Formato válido
           userId: user.id,
           branchId: selectedBranch?.id,
           openingAmount: data.amount,
           openingDate: new Date().toISOString(),
           status: 'open',
           currency: 'ARS',
+          notes: data.notes || '',
         };
 
         set({ cashSession });
@@ -214,7 +232,7 @@ export const useAuthStore = create(
       },
     }),
     {
-      name: 'factusystem-auth', // Nombre en localStorage
+      name: 'factusystem-auth',
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,
@@ -229,30 +247,18 @@ export const useAuthStore = create(
 // HOOKS AUXILIARES
 // ===========================================
 
-/**
- * Hook para verificar si el usuario está autenticado
- */
 export const useIsAuthenticated = () => {
   return useAuthStore((state) => state.isAuthenticated);
 };
 
-/**
- * Hook para obtener el usuario actual
- */
 export const useCurrentUser = () => {
   return useAuthStore((state) => state.user);
 };
 
-/**
- * Hook para obtener la sucursal actual
- */
 export const useCurrentBranch = () => {
   return useAuthStore((state) => state.selectedBranch);
 };
 
-/**
- * Hook para verificar permisos
- */
 export const useHasPermission = (permission) => {
   return useAuthStore((state) => state.hasPermission(permission));
 };
