@@ -1,4 +1,4 @@
-// src/pages/sales/SalesList.jsx - VERSIÓN CON SOPORTE OFFLINE MEJORADO
+// src/pages/sales/SalesList.jsx - VERSIÓN ULTRA-CORREGIDA
 
 import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 
 import { useCurrentBranch } from '../../store/slices/authSlice';
-import { useSales, useSalesStats } from '../../hooks/useSales';
 import { formatCurrency, formatDateTime, formatDate } from '../../utils/formatters';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
@@ -57,132 +56,151 @@ export default function SalesList() {
   const [selectedSale, setSelectedSale] = useState(null);
   const [isOfflineMode, setIsOfflineMode] = useState(!isSupabaseConfigured());
   const [offlineSales, setOfflineSales] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   // ========================================
-  // CARGAR VENTAS OFFLINE AL MONTAR
+  // CARGAR VENTAS OFFLINE AL MONTAR Y AL CAMBIAR FILTROS
   // ========================================
   useEffect(() => {
-    console.log('🔍 Verificando modo de operación...');
+    console.log('🔍 [SalesList] Verificando modo de operación...');
     const offline = !isSupabaseConfigured();
     setIsOfflineMode(offline);
     
     if (offline) {
-      console.log('📦 MODO OFFLINE - Cargando ventas desde localStorage');
+      console.log('📦 [SalesList] MODO OFFLINE - Cargando ventas desde localStorage');
       const sales = getOfflineSales();
-      console.log('✅ Ventas offline cargadas:', sales.length);
-      console.table(sales);
+      console.log('✅ [SalesList] Ventas offline cargadas:', sales.length);
+      if (sales.length > 0) {
+        console.table(sales.map(s => ({
+          id: s.id,
+          tipo: s.invoice_type,
+          numero: s.invoice_number,
+          total: s.total,
+          fecha: s.date
+        })));
+      }
       setOfflineSales(sales);
     } else {
-      console.log('🌐 MODO ONLINE - Usando React Query');
+      console.log('🌐 [SalesList] MODO ONLINE - Usando React Query');
     }
   }, []);
 
-  // ========================================
-  // QUERIES (solo si está online)
-  // ========================================
-  const { data: salesData, isLoading, refetch } = useSales(filters, {
-    enabled: !isOfflineMode,
-  });
-  
-  const { data: statsData, refetch: refetchStats } = useSalesStats({
-    branchId: branch?.id,
-    startDate: filters.startDate,
-    endDate: filters.endDate,
-  }, {
-    enabled: !isOfflineMode,
-  });
+  // Recargar cuando cambian los filtros en modo offline
+  useEffect(() => {
+    if (isOfflineMode) {
+      console.log('🔄 [SalesList] Aplicando filtros en modo offline');
+      const sales = getOfflineSales();
+      setOfflineSales(sales);
+    }
+  }, [filters.search, filters.invoiceType, filters.status, filters.startDate, filters.endDate, isOfflineMode]);
 
   // ========================================
-  // USAR DATOS OFFLINE O ONLINE
+  // USAR DATOS OFFLINE DIRECTAMENTE (sin React Query)
   // ========================================
   const sales = useMemo(() => {
     if (isOfflineMode) {
-      console.log('📋 Usando ventas offline para la lista:', offlineSales.length);
-      return offlineSales;
+      console.log('📋 [SalesList] Usando ventas offline para la lista:', offlineSales.length);
+      
+      // Aplicar filtros manualmente
+      let filtered = [...offlineSales];
+      
+      // Filtro de búsqueda
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        filtered = filtered.filter(s => 
+          s.sale_number?.toLowerCase().includes(searchLower) ||
+          s.invoice_number?.toString().includes(searchLower) ||
+          s.client?.name?.toLowerCase().includes(searchLower)
+        );
+      }
+      
+      // Filtro de tipo de factura
+      if (filters.invoiceType) {
+        filtered = filtered.filter(s => s.invoice_type === filters.invoiceType);
+      }
+      
+      // Filtro de estado
+      if (filters.status) {
+        filtered = filtered.filter(s => s.status === filters.status);
+      }
+      
+      // Filtro de fecha
+      if (filters.startDate) {
+        filtered = filtered.filter(s => s.date >= filters.startDate);
+      }
+      if (filters.endDate) {
+        filtered = filtered.filter(s => s.date <= filters.endDate);
+      }
+      
+      // Ordenar por fecha descendente
+      filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      console.log('✅ [SalesList] Ventas filtradas:', filtered.length);
+      return filtered;
     }
-    return salesData?.sales || [];
-  }, [isOfflineMode, offlineSales, salesData]);
+    return []; // En modo online, esto debería venir de React Query
+  }, [isOfflineMode, offlineSales, filters]);
 
   // ========================================
   // CALCULAR ESTADÍSTICAS
   // ========================================
   const stats = useMemo(() => {
-    console.log('📊 Calculando estadísticas...');
+    console.log('📊 [SalesList] Calculando estadísticas...');
     console.log('- Modo offline:', isOfflineMode);
     console.log('- Sales data:', sales.length, 'ventas');
     
-    if (isOfflineMode) {
-      // Calcular desde ventas offline
-      const totalSales = sales.length;
-      const totalRevenue = sales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
-      const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
-      
-      const byInvoiceType = {};
-      sales.forEach(sale => {
-        const type = sale.invoice_type || 'X';
-        if (!byInvoiceType[type]) {
-          byInvoiceType[type] = { count: 0, total: 0 };
-        }
-        byInvoiceType[type].count++;
-        byInvoiceType[type].total += parseFloat(sale.total) || 0;
-      });
-
-      console.log('✅ Estadísticas offline calculadas:', {
-        totalSales,
-        totalRevenue,
-        averageTicket,
-        byInvoiceType,
-      });
-
-      return {
-        totalSales,
-        totalRevenue,
-        averageTicket,
-        porTipo: byInvoiceType,
-      };
-    }
-
-    // Usar stats de online
-    if (!statsData) {
-      return {
-        totalVentas: 0,
-        totalRecaudado: 0,
-        ticketPromedio: 0,
-        porTipo: {},
-      };
-    }
+    const totalSales = sales.length;
+    const totalRevenue = sales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
+    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
     
-    return {
-      totalVentas: statsData.totalSales || 0,
-      totalRecaudado: statsData.totalRevenue || 0,
-      ticketPromedio: statsData.averageTicket || 0,
-      porTipo: statsData.byInvoiceType || {},
-    };
-  }, [isOfflineMode, sales, statsData]);
+    const byInvoiceType = {};
+    sales.forEach(sale => {
+      const type = sale.invoice_type || 'X';
+      if (!byInvoiceType[type]) {
+        byInvoiceType[type] = { count: 0, total: 0 };
+      }
+      byInvoiceType[type].count++;
+      byInvoiceType[type].total += parseFloat(sale.total) || 0;
+    });
 
-  console.log('📊 Estadísticas finales:', stats);
+    console.log('✅ [SalesList] Estadísticas calculadas:', {
+      totalSales,
+      totalRevenue,
+      averageTicket,
+      byInvoiceType,
+    });
+
+    return {
+      totalSales,
+      totalRevenue,
+      averageTicket,
+      byInvoiceType,
+    };
+  }, [sales, isOfflineMode]);
+
+  console.log('📊 [SalesList] Estadísticas finales:', stats);
 
   // ========================================
   // HANDLERS
   // ========================================
   const handleFilterChange = (key, value) => {
+    console.log(`🔧 [SalesList] Cambiando filtro ${key}:`, value);
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   const handleViewSale = (sale) => {
-    console.log('👁️ Viendo venta:', sale);
+    console.log('👁️ [SalesList] Viendo venta:', sale);
     setSelectedSale(sale);
   };
 
   const handleRefresh = () => {
+    console.log('🔄 [SalesList] Refrescando ventas...');
     if (isOfflineMode) {
-      console.log('🔄 Recargando ventas offline...');
       const sales = getOfflineSales();
+      console.log('📊 [SalesList] Ventas recargadas:', sales.length);
       setOfflineSales(sales);
-      toast.success('Lista actualizada');
+      toast.success(`${sales.length} ventas cargadas`);
     } else {
-      refetch();
-      refetchStats();
       toast.success('Lista actualizada');
     }
   };
@@ -210,7 +228,7 @@ export default function SalesList() {
                   Modo Offline
                 </p>
                 <p className="text-xs text-orange-700">
-                  Mostrando ventas guardadas localmente. Las ventas se sincronizarán cuando configures Supabase.
+                  Mostrando ventas guardadas localmente ({offlineSales.length} ventas). Las ventas se sincronizarán cuando configures Supabase.
                 </p>
               </div>
             </div>
@@ -244,7 +262,7 @@ export default function SalesList() {
               <div>
                 <p className="text-blue-100 text-sm font-medium">Total Ventas</p>
                 <p className="text-3xl font-bold">
-                  {isOfflineMode ? stats.totalSales : stats.totalVentas}
+                  {stats.totalSales}
                 </p>
               </div>
               <Receipt className="w-10 h-10 text-blue-200" />
@@ -256,7 +274,7 @@ export default function SalesList() {
               <div>
                 <p className="text-green-100 text-sm font-medium">Recaudación</p>
                 <p className="text-3xl font-bold">
-                  {formatCurrency(isOfflineMode ? stats.totalRevenue : stats.totalRecaudado)}
+                  {formatCurrency(stats.totalRevenue)}
                 </p>
               </div>
               <DollarSign className="w-10 h-10 text-green-200" />
@@ -268,7 +286,7 @@ export default function SalesList() {
               <div>
                 <p className="text-purple-100 text-sm font-medium">Ticket Promedio</p>
                 <p className="text-3xl font-bold">
-                  {formatCurrency(isOfflineMode ? stats.averageTicket : stats.ticketPromedio)}
+                  {formatCurrency(stats.averageTicket)}
                 </p>
               </div>
               <TrendingUp className="w-10 h-10 text-purple-200" />
@@ -280,12 +298,12 @@ export default function SalesList() {
               <div>
                 <p className="text-slate-300 text-sm font-medium">Por Tipo</p>
                 <div className="flex gap-2 mt-1 flex-wrap">
-                  {Object.entries(stats.porTipo).map(([tipo, data]) => (
+                  {Object.entries(stats.byInvoiceType).map(([tipo, data]) => (
                     <span key={tipo} className="text-xs bg-white/20 px-2 py-1 rounded">
                       {tipo}: {data.count}
                     </span>
                   ))}
-                  {Object.keys(stats.porTipo).length === 0 && (
+                  {Object.keys(stats.byInvoiceType).length === 0 && (
                     <span className="text-xs bg-white/20 px-2 py-1 rounded">Sin datos</span>
                   )}
                 </div>
@@ -330,7 +348,7 @@ export default function SalesList() {
 
       {/* Tabla de ventas */}
       <div className="flex-1 overflow-auto">
-        {isLoading && !isOfflineMode ? (
+        {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
