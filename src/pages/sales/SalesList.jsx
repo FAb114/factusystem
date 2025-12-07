@@ -1,4 +1,4 @@
-// src/pages/sales/SalesList.jsx - VERSIÓN ULTRA-CORREGIDA
+// src/pages/sales/SalesList.jsx - VERSIÓN CON AUTO-REFRESH
 
 import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
@@ -45,21 +45,42 @@ const getOfflineSales = () => {
 export default function SalesList() {
   const branch = useCurrentBranch();
 
+  // 🔥 CORREGIDO: Fechas con rango amplio por defecto
   const [filters, setFilters] = useState({
     search: '',
     invoiceType: '',
     status: '',
-    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+    startDate: '', // 🔥 Vacío = sin filtro de fecha inicial
+    endDate: '',   // 🔥 Vacío = sin filtro de fecha final
   });
 
   const [selectedSale, setSelectedSale] = useState(null);
   const [isOfflineMode, setIsOfflineMode] = useState(!isSupabaseConfigured());
   const [offlineSales, setOfflineSales] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // 🔥 NUEVO: Para forzar re-render
 
   // ========================================
-  // CARGAR VENTAS OFFLINE AL MONTAR Y AL CAMBIAR FILTROS
+  // 🔥 NUEVO: ESCUCHAR EVENTOS DE VENTAS NUEVAS
+  // ========================================
+  useEffect(() => {
+    const handleNewSale = (event) => {
+      console.log('🎉 [SalesList] Nueva venta detectada:', event.detail);
+      // Recargar ventas
+      const sales = getOfflineSales();
+      setOfflineSales(sales);
+      toast.success('Nueva venta registrada');
+    };
+
+    window.addEventListener('offline-sale-created', handleNewSale);
+
+    return () => {
+      window.removeEventListener('offline-sale-created', handleNewSale);
+    };
+  }, []);
+
+  // ========================================
+  // CARGAR VENTAS AL MONTAR Y AL CAMBIAR FILTROS
   // ========================================
   useEffect(() => {
     console.log('🔍 [SalesList] Verificando modo de operación...');
@@ -76,16 +97,17 @@ export default function SalesList() {
           tipo: s.invoice_type,
           numero: s.invoice_number,
           total: s.total,
-          fecha: s.date
+          fecha: s.date,
+          cliente: s.client?.name
         })));
       }
       setOfflineSales(sales);
     } else {
       console.log('🌐 [SalesList] MODO ONLINE - Usando React Query');
     }
-  }, []);
+  }, [refreshTrigger]); // 🔥 Reacciona a refreshTrigger
 
-  // Recargar cuando cambian los filtros en modo offline
+  // Recargar cuando cambian los filtros
   useEffect(() => {
     if (isOfflineMode) {
       console.log('🔄 [SalesList] Aplicando filtros en modo offline');
@@ -95,13 +117,12 @@ export default function SalesList() {
   }, [filters.search, filters.invoiceType, filters.status, filters.startDate, filters.endDate, isOfflineMode]);
 
   // ========================================
-  // USAR DATOS OFFLINE DIRECTAMENTE (sin React Query)
+  // USAR DATOS OFFLINE
   // ========================================
   const sales = useMemo(() => {
     if (isOfflineMode) {
       console.log('📋 [SalesList] Usando ventas offline para la lista:', offlineSales.length);
       
-      // Aplicar filtros manualmente
       let filtered = [...offlineSales];
       
       // Filtro de búsqueda
@@ -124,12 +145,21 @@ export default function SalesList() {
         filtered = filtered.filter(s => s.status === filters.status);
       }
       
-      // Filtro de fecha
+      // Filtro de fecha - 🔥 SOLO aplica si hay valor
       if (filters.startDate) {
-        filtered = filtered.filter(s => s.date >= filters.startDate);
+        const filterStart = new Date(filters.startDate);
+        filtered = filtered.filter(s => {
+          const saleDate = new Date(s.date || s.created_at);
+          return saleDate >= filterStart;
+        });
       }
       if (filters.endDate) {
-        filtered = filtered.filter(s => s.date <= filters.endDate);
+        const filterEnd = new Date(filters.endDate);
+        filterEnd.setHours(23, 59, 59, 999); // Incluir todo el día
+        filtered = filtered.filter(s => {
+          const saleDate = new Date(s.date || s.created_at);
+          return saleDate <= filterEnd;
+        });
       }
       
       // Ordenar por fecha descendente
@@ -138,7 +168,7 @@ export default function SalesList() {
       console.log('✅ [SalesList] Ventas filtradas:', filtered.length);
       return filtered;
     }
-    return []; // En modo online, esto debería venir de React Query
+    return [];
   }, [isOfflineMode, offlineSales, filters]);
 
   // ========================================
@@ -146,8 +176,6 @@ export default function SalesList() {
   // ========================================
   const stats = useMemo(() => {
     console.log('📊 [SalesList] Calculando estadísticas...');
-    console.log('- Modo offline:', isOfflineMode);
-    console.log('- Sales data:', sales.length, 'ventas');
     
     const totalSales = sales.length;
     const totalRevenue = sales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
@@ -176,9 +204,7 @@ export default function SalesList() {
       averageTicket,
       byInvoiceType,
     };
-  }, [sales, isOfflineMode]);
-
-  console.log('📊 [SalesList] Estadísticas finales:', stats);
+  }, [sales]);
 
   // ========================================
   // HANDLERS
@@ -199,6 +225,7 @@ export default function SalesList() {
       const sales = getOfflineSales();
       console.log('📊 [SalesList] Ventas recargadas:', sales.length);
       setOfflineSales(sales);
+      setRefreshTrigger(prev => prev + 1); // 🔥 Forzar re-render
       toast.success(`${sales.length} ventas cargadas`);
     } else {
       toast.success('Lista actualizada');
@@ -239,8 +266,14 @@ export default function SalesList() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Ventas</h1>
             <p className="text-sm text-slate-500">
-              {format(new Date(filters.startDate), "d 'de' MMMM", { locale: es })} - {' '}
-              {format(new Date(filters.endDate), "d 'de' MMMM yyyy", { locale: es })}
+              {filters.startDate && filters.endDate ? (
+                <>
+                  {format(new Date(filters.startDate), "d 'de' MMMM", { locale: es })} - {' '}
+                  {format(new Date(filters.endDate), "d 'de' MMMM yyyy", { locale: es })}
+                </>
+              ) : (
+                'Todas las ventas'
+              )}
             </p>
           </div>
           

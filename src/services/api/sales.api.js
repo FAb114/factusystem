@@ -1,4 +1,4 @@
-// src/services/api/sales.api.js - VERSIÓN CORREGIDA MODO OFFLINE
+// src/services/api/sales.api.js - VERSIÓN CORREGIDA PARA VENTAS OFFLINE
 
 import supabase, { isSupabaseConfigured } from '../../lib/supabase';
 import { useAuthStore } from '../../store/slices/authSlice';
@@ -29,6 +29,10 @@ const saveOfflineSale = (sale) => {
     localStorage.setItem(OFFLINE_STORAGE_KEY, JSON.stringify(sales));
     console.log('✅ [sales.api] Venta guardada offline correctamente');
     console.log('📊 [sales.api] Total de ventas offline:', sales.length);
+    
+    // 🔥 DISPARA EVENTO PERSONALIZADO PARA QUE SALELIST SE ENTERE
+    window.dispatchEvent(new CustomEvent('offline-sale-created', { detail: sale }));
+    
     return true;
   } catch (error) {
     console.error('❌ [sales.api] Error guardando offline:', error);
@@ -38,7 +42,7 @@ const saveOfflineSale = (sale) => {
 
 /**
  * ===========================================
- * VALIDAR UUID - CRÍTICO PARA SUPABASE
+ * VALIDAR UUID
  * ===========================================
  */
 const isValidUUID = (uuid) => {
@@ -49,13 +53,14 @@ const isValidUUID = (uuid) => {
 
 /**
  * ===========================================
- * CREAR VENTA - ULTRA-ROBUSTA
+ * CREAR VENTA - ULTRA-ROBUSTA CON CLIENTE
  * ===========================================
  */
 export const createSale = async (saleData) => {
   console.log('═══════════════════════════════════════');
   console.log('🚀 [sales.api] INICIANDO CREACIÓN DE VENTA');
   console.log('═══════════════════════════════════════');
+  console.log('📤 [sales.api] Datos recibidos:', saleData);
 
   // Obtener IDs del store
   const authState = useAuthStore.getState();
@@ -63,10 +68,22 @@ export const createSale = async (saleData) => {
   const branchId = saleData.branchId || authState.selectedBranch?.id;
   const clientId = saleData.clientId === 'C0' ? null : saleData.clientId;
 
-  console.log('🔍 [sales.api] IDs recibidos:', { userId, branchId, clientId });
+  console.log('🔍 [sales.api] IDs procesados:', { userId, branchId, clientId });
 
   // ========================================
-  // VERIFICAR MODO OFFLINE PRIMERO
+  // PREPARAR DATOS DEL CLIENTE
+  // ========================================
+  const clientData = saleData.client || {
+    id: clientId || 'C0',
+    name: saleData.clientName || 'CONSUMIDOR FINAL',
+    document_number: saleData.clientDocument || '0',
+    iva_condition: saleData.clientCondition || 'Final',
+  };
+
+  console.log('👤 [sales.api] Cliente:', clientData);
+
+  // ========================================
+  // VERIFICAR MODO OFFLINE
   // ========================================
   const isOnline = isSupabaseConfigured();
   console.log('🌐 [sales.api] Estado:', isOnline ? 'ONLINE' : 'OFFLINE');
@@ -76,7 +93,7 @@ export const createSale = async (saleData) => {
   const baseSale = {
     sale_number: `SALE-${timestamp}`,
     invoice_type: saleData.invoiceType || 'X',
-    invoice_number: saleData.invoiceNumber?.toString() || null,
+    invoice_number: saleData.invoiceNumber?.toString() || String(timestamp).slice(-8),
     point_of_sale: parseInt(saleData.pointOfSale) || 1,
     branch_id: branchId,
     user_id: userId,
@@ -99,15 +116,19 @@ export const createSale = async (saleData) => {
   if (!isOnline) {
     console.warn('⚠️ [sales.api] MODO OFFLINE - Guardando localmente');
     
+    // 🔥 INCLUIR DATOS DEL CLIENTE EN LA VENTA OFFLINE
     const offlineSale = {
       id: `offline-sale-${timestamp}`,
       ...baseSale,
+      client: clientData, // 🔥 ESTO ES CRÍTICO
       items: saleData.items || [],
       payments: saleData.payments || [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       _offlineMode: true,
     };
+    
+    console.log('💾 [sales.api] Venta offline preparada:', offlineSale);
     
     if (saveOfflineSale(offlineSale)) {
       console.log('✅ [sales.api] Venta guardada offline exitosamente');
@@ -127,48 +148,18 @@ export const createSale = async (saleData) => {
   }
 
   // ========================================
-  // MODO ONLINE - VALIDAR UUIDS ANTES DE SUPABASE
+  // MODO ONLINE - VALIDAR UUIDS
   // ========================================
   console.log('📡 [sales.api] Modo ONLINE - Validando UUIDs...');
   
-  // Validar UUIDs
   if (!isValidUUID(branchId)) {
     console.error('❌ [sales.api] branch_id inválido:', branchId);
     console.warn('⚠️ [sales.api] Fallback a modo offline por UUID inválido');
     
-    // FALLBACK: Guardar offline si los IDs no son válidos para Supabase
     const offlineSale = {
       id: `offline-sale-${timestamp}`,
       ...baseSale,
-      items: saleData.items || [],
-      payments: saleData.payments || [],
-      created_at: new Date().toISOString(),
-      sync_pending: true,
-      _offlineMode: true,
-      _reason: 'Invalid UUID - waiting for Supabase configuration',
-    };
-    
-    if (saveOfflineSale(offlineSale)) {
-      return { 
-        success: true, 
-        data: offlineSale, 
-        warning: 'Venta guardada offline (IDs de prueba detectados). Configura Supabase para sincronizar.' 
-      };
-    }
-    
-    return { 
-      success: false, 
-      error: 'IDs inválidos para Supabase y fallo guardando offline' 
-    };
-  }
-
-  if (userId && !isValidUUID(userId)) {
-    console.error('❌ [sales.api] user_id inválido:', userId);
-    console.warn('⚠️ [sales.api] Fallback a modo offline por UUID inválido');
-    
-    const offlineSale = {
-      id: `offline-sale-${timestamp}`,
-      ...baseSale,
+      client: clientData,
       items: saleData.items || [],
       payments: saleData.payments || [],
       created_at: new Date().toISOString(),
@@ -195,8 +186,7 @@ export const createSale = async (saleData) => {
   // SUPABASE - GUARDAR EN BASE DE DATOS
   // ========================================
   try {
-    console.log('📡 [sales.api] Guardando en Supabase con UUIDs válidos...');
-    console.log('📤 [sales.api] Datos:', baseSale);
+    console.log('📡 [sales.api] Guardando en Supabase...');
 
     const { data: sale, error: saleError } = await supabase
       .from('sales')
@@ -207,11 +197,11 @@ export const createSale = async (saleData) => {
     if (saleError) {
       console.error('❌ [sales.api] ERROR SUPABASE:', saleError);
       
-      // FALLBACK: Guardar offline si falla Supabase
-      console.warn('⚠️ [sales.api] Fallback a modo offline por error de Supabase...');
+      // Fallback offline
       const offlineSale = {
         id: `offline-sale-${timestamp}`,
         ...baseSale,
+        client: clientData,
         items: saleData.items || [],
         payments: saleData.payments || [],
         created_at: new Date().toISOString(),
@@ -235,8 +225,6 @@ export const createSale = async (saleData) => {
 
     // Insertar items
     if (saleData.items?.length > 0) {
-      console.log('📦 [sales.api] Insertando items...');
-      
       const saleItems = saleData.items.map(item => ({
         sale_id: sale.id,
         product_id: item.id?.startsWith('gen-') ? null : item.id,
@@ -250,19 +238,11 @@ export const createSale = async (saleData) => {
         total: parseFloat(item.price) * parseFloat(item.quantity) * (1 - (parseFloat(item.discount) || 0) / 100),
       }));
 
-      const { error: itemsError } = await supabase
-        .from('sale_items')
-        .insert(saleItems);
-
-      if (itemsError) {
-        console.warn('⚠️ [sales.api] Error insertando items:', itemsError);
-      }
+      await supabase.from('sale_items').insert(saleItems);
     }
 
     // Insertar pagos
     if (saleData.payments?.length > 0) {
-      console.log('💳 [sales.api] Insertando pagos...');
-      
       const salePayments = saleData.payments.map(p => ({
         sale_id: sale.id,
         method: p.method,
@@ -270,13 +250,7 @@ export const createSale = async (saleData) => {
         status: 'approved',
       }));
 
-      const { error: paymentsError } = await supabase
-        .from('sale_payments')
-        .insert(salePayments);
-
-      if (paymentsError) {
-        console.warn('⚠️ [sales.api] Error insertando pagos:', paymentsError);
-      }
+      await supabase.from('sale_payments').insert(salePayments);
     }
 
     console.log('🎉 [sales.api] Venta completada exitosamente');
@@ -286,6 +260,7 @@ export const createSale = async (saleData) => {
       success: true, 
       data: {
         ...sale,
+        client: clientData,
         items: saleData.items || [],
         payments: saleData.payments || [],
       }
@@ -294,10 +269,10 @@ export const createSale = async (saleData) => {
   } catch (error) {
     console.error('❌ [sales.api] ERROR CRÍTICO:', error);
     
-    // ÚLTIMO FALLBACK: Guardar offline
     const offlineSale = {
       id: `offline-sale-${timestamp}`,
       ...baseSale,
+      client: clientData,
       items: saleData.items || [],
       payments: saleData.payments || [],
       created_at: new Date().toISOString(),
@@ -323,12 +298,15 @@ export const createSale = async (saleData) => {
 
 /**
  * ===========================================
- * OBTENER VENTAS
+ * OBTENER VENTAS - CON CLIENTE
  * ===========================================
  */
 export const getSales = async (filters = {}) => {
+  console.log('📋 [sales.api] Obteniendo ventas con filtros:', filters);
+  
   if (!isSupabaseConfigured()) {
     const sales = getOfflineSales();
+    console.log('📦 [sales.api] Retornando ventas offline:', sales.length);
     return {
       success: true,
       data: {
@@ -388,7 +366,7 @@ export const getSales = async (filters = {}) => {
 
 /**
  * ===========================================
- * ESTADÍSTICAS
+ * OTRAS FUNCIONES
  * ===========================================
  */
 export const getSalesStats = async (filters = {}) => {
