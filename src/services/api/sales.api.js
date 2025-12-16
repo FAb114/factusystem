@@ -152,9 +152,17 @@ export const createSale = async (saleData) => {
   // ========================================
   console.log('📡 [sales.api] Modo ONLINE - Validando UUIDs...');
   
+  // MODIFICACIÓN AQUÍ: Permitir IDs que empiecen con 'offline-' sin error crítico
+  const isOfflineId = String(branchId).startsWith('offline-');
+
   if (!isValidUUID(branchId)) {
-    console.error('❌ [sales.api] branch_id inválido:', branchId);
-    console.warn('⚠️ [sales.api] Fallback a modo offline por UUID inválido');
+    if (isOfflineId) {
+      console.warn('⚠️ [sales.api] ID de prueba detectado. Guardando localmente.');
+    } else {
+      console.error('❌ [sales.api] branch_id inválido:', branchId);
+    }
+    
+    console.warn('⚠️ [sales.api] Fallback a modo offline por ID local');
     
     const offlineSale = {
       id: `offline-sale-${timestamp}`,
@@ -163,22 +171,22 @@ export const createSale = async (saleData) => {
       items: saleData.items || [],
       payments: saleData.payments || [],
       created_at: new Date().toISOString(),
-      sync_pending: true,
+      sync_pending: true, // Se intentará sincronizar si luego tienes IDs válidos
       _offlineMode: true,
-      _reason: 'Invalid UUID - waiting for Supabase configuration',
+      _reason: 'Test User ID or Invalid UUID',
     };
     
     if (saveOfflineSale(offlineSale)) {
       return { 
         success: true, 
         data: offlineSale, 
-        warning: 'Venta guardada offline (IDs de prueba detectados). Configura Supabase para sincronizar.' 
+        warning: 'Venta guardada localmente (Usuario de prueba).' 
       };
     }
     
     return { 
       success: false, 
-      error: 'IDs inválidos para Supabase y fallo guardando offline' 
+      error: 'Error al guardar venta local' 
     };
   }
 
@@ -296,28 +304,91 @@ export const createSale = async (saleData) => {
   }
 };
 
-/**
+ /**
  * ===========================================
- * OBTENER VENTAS - CON CLIENTE
+ * OBTENER VENTAS - HÍBRIDO (NUBE + LOCAL)
  * ===========================================
  */
 export const getSales = async (filters = {}) => {
   console.log('📋 [sales.api] Obteniendo ventas con filtros:', filters);
   
+  // 1. LEER SIEMPRE LO LOCAL PRIMERO
+  const localSales = getOfflineSales();
+
+  // Si estamos puramente offline, devolver solo lo local
   if (!isSupabaseConfigured()) {
-    const sales = getOfflineSales();
-    console.log('📦 [sales.api] Retornando ventas offline:', sales.length);
+    console.log('📦 [sales.api] Retornando ventas offline:', localSales.length);
     return {
       success: true,
       data: {
-        sales: sales,
-        total: sales.length,
+        sales: localSales,
+        total: localSales.length,
         page: 1,
         totalPages: 1,
       },
     };
   }
 
+  // Si estamos ONLINE, intentamos leer de la nube y mezclar
+  try {
+    let query = supabase
+      .from('sales')
+      .select(`
+        *,
+        client:clients(id, name, document_number),
+        items:sale_items(*)
+      `, { count: 'exact' });
+
+    const { search, invoiceType, status, startDate, endDate, page = 1, limit = 50 } = filters;
+
+    // Filtros de búsqueda (igual que antes)
+    if (search) query = query.or(`sale_number.ilike.%${search}%,invoice_number.ilike.%${search}%`);
+    if (invoiceType) query = query.eq('invoice_type', invoiceType);
+    if (status) query = query.eq('status', status);
+    if (startDate) query = query.gte('date', startDate);
+    if (endDate) query = query.lte('date', endDate);
+
+    query = query.order('date', { ascending: false });
+
+    // Paginación
+    const from = (page - 1) * limit;
+    query = query.range(from, from + limit - 1);
+
+    const { data: remoteSales, error, count } = await query;
+
+    if (error) throw error;
+
+    // 🔥🔥 AQUÍ ESTÁ EL TRUCO: FUSIÓN DE DATOS 🔥🔥
+    // Combinamos lo que viene de la nube (vacío) con lo local (tus 4 ventas)
+    const allSales = [...(remoteSales || []), ...localSales];
+
+    // Ordenar todas por fecha (las más nuevas primero)
+    allSales.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+
+    console.log(`✅ [sales.api] Ventas combinadas: ${remoteSales?.length || 0} nube + ${localSales.length} locales`);
+
+    return {
+      success: true,
+      data: {
+        sales: allSales, 
+        total: (count || 0) + localSales.length,
+        page,
+        totalPages: Math.ceil(((count || 0) + localSales.length) / limit),
+      },
+    };
+
+  } catch (error) {
+    console.error('[sales.api] Error obteniendo ventas de nube, mostrando locales:', error);
+    // Si falla internet, mostramos lo local
+    return {
+      success: true,
+      data: { sales: localSales, total: localSales.length, page: 1, totalPages: 1 },
+      warning: 'Mostrando solo ventas offline (Error de conexión)',
+    };
+  }
+};
+
+  // Si hay Supabase, intentamos traer datos de la nube
   try {
     let query = supabase
       .from('sales')
@@ -337,32 +408,43 @@ export const getSales = async (filters = {}) => {
 
     query = query.order('date', { ascending: false });
 
+    // Paginación
     const from = (page - 1) * limit;
     query = query.range(from, from + limit - 1);
 
-    const { data, error, count } = await query;
+    const { data: remoteSales, error, count } = await query;
 
     if (error) throw error;
+
+    // 🔥 FUSIÓN DE DATOS: Combinar Nube + Local
+    // Esto asegura que veas tus ventas de prueba aunque estés "Online"
+    const allSales = [...(remoteSales || []), ...localSales];
+
+    // Ordenar todas por fecha descendente (más nuevas primero)
+    allSales.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+
+    console.log(`✅ [sales.api] Ventas combinadas: ${remoteSales?.length || 0} nube + ${localSales.length} locales`);
 
     return {
       success: true,
       data: {
-        sales: data || [],
-        total: count || 0,
+        sales: allSales, // Devolvemos la lista combinada
+        total: (count || 0) + localSales.length,
         page,
-        totalPages: Math.ceil((count || 0) / limit),
+        totalPages: Math.ceil(((count || 0) + localSales.length) / limit),
       },
     };
+
   } catch (error) {
-    console.error('[sales.api] Error obteniendo ventas:', error);
-    const sales = getOfflineSales();
+    console.error('[sales.api] Error obteniendo ventas de nube, mostrando locales:', error);
+    // En caso de error de red, mostramos las locales como respaldo
     return {
       success: true,
-      data: { sales, total: sales.length, page: 1, totalPages: 1 },
-      warning: 'Mostrando solo ventas offline',
+      data: { sales: localSales, total: localSales.length, page: 1, totalPages: 1 },
+      warning: 'Mostrando solo ventas offline (Error de conexión)',
     };
   }
-};
+;
 
 /**
  * ===========================================
