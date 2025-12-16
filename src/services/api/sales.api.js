@@ -1,11 +1,11 @@
-// src/services/api/sales.api.js - VERSIÓN CORREGIDA PARA VENTAS OFFLINE
+// src/services/api/sales.api.js - VERSIÓN CORREGIDA
 
 import supabase, { isSupabaseConfigured } from '../../lib/supabase';
 import { useAuthStore } from '../../store/slices/authSlice';
 
 /**
  * ===========================================
- * STORAGE OFFLINE - MEJORADO
+ * STORAGE OFFLINE
  * ===========================================
  */
 const OFFLINE_STORAGE_KEY = 'factusystem_offline_sales';
@@ -30,7 +30,7 @@ const saveOfflineSale = (sale) => {
     console.log('✅ [sales.api] Venta guardada offline correctamente');
     console.log('📊 [sales.api] Total de ventas offline:', sales.length);
     
-    // 🔥 DISPARA EVENTO PERSONALIZADO PARA QUE SALELIST SE ENTERE
+    // 🔥 DISPARA EVENTO PERSONALIZADO
     window.dispatchEvent(new CustomEvent('offline-sale-created', { detail: sale }));
     
     return true;
@@ -53,7 +53,7 @@ const isValidUUID = (uuid) => {
 
 /**
  * ===========================================
- * CREAR VENTA - ULTRA-ROBUSTA CON CLIENTE
+ * CREAR VENTA - ROBUSTA
  * ===========================================
  */
 export const createSale = async (saleData) => {
@@ -70,9 +70,7 @@ export const createSale = async (saleData) => {
 
   console.log('🔍 [sales.api] IDs procesados:', { userId, branchId, clientId });
 
-  // ========================================
-  // PREPARAR DATOS DEL CLIENTE
-  // ========================================
+  // Preparar datos del cliente
   const clientData = saleData.client || {
     id: clientId || 'C0',
     name: saleData.clientName || 'CONSUMIDOR FINAL',
@@ -82,13 +80,10 @@ export const createSale = async (saleData) => {
 
   console.log('👤 [sales.api] Cliente:', clientData);
 
-  // ========================================
-  // VERIFICAR MODO OFFLINE
-  // ========================================
+  // Verificar modo offline
   const isOnline = isSupabaseConfigured();
   console.log('🌐 [sales.api] Estado:', isOnline ? 'ONLINE' : 'OFFLINE');
 
-  // Preparar venta base
   const timestamp = Date.now();
   const baseSale = {
     sale_number: `SALE-${timestamp}`,
@@ -110,17 +105,14 @@ export const createSale = async (saleData) => {
     notes: saleData.notes || null,
   };
 
-  // ========================================
-  // MODO OFFLINE - GUARDAR LOCALMENTE
-  // ========================================
-  if (!isOnline) {
+  // MODO OFFLINE o IDs no válidos - Guardar localmente
+  if (!isOnline || String(branchId).startsWith('offline-') || String(userId).startsWith('offline-')) {
     console.warn('⚠️ [sales.api] MODO OFFLINE - Guardando localmente');
     
-    // 🔥 INCLUIR DATOS DEL CLIENTE EN LA VENTA OFFLINE
     const offlineSale = {
       id: `offline-sale-${timestamp}`,
       ...baseSale,
-      client: clientData, // 🔥 ESTO ES CRÍTICO
+      client: clientData,
       items: saleData.items || [],
       payments: saleData.payments || [],
       created_at: new Date().toISOString(),
@@ -147,52 +139,7 @@ export const createSale = async (saleData) => {
     }
   }
 
-  // ========================================
-  // MODO ONLINE - VALIDAR UUIDS
-  // ========================================
-  console.log('📡 [sales.api] Modo ONLINE - Validando UUIDs...');
-  
-  // MODIFICACIÓN AQUÍ: Permitir IDs que empiecen con 'offline-' sin error crítico
-  const isOfflineId = String(branchId).startsWith('offline-');
-
-  if (!isValidUUID(branchId)) {
-    if (isOfflineId) {
-      console.warn('⚠️ [sales.api] ID de prueba detectado. Guardando localmente.');
-    } else {
-      console.error('❌ [sales.api] branch_id inválido:', branchId);
-    }
-    
-    console.warn('⚠️ [sales.api] Fallback a modo offline por ID local');
-    
-    const offlineSale = {
-      id: `offline-sale-${timestamp}`,
-      ...baseSale,
-      client: clientData,
-      items: saleData.items || [],
-      payments: saleData.payments || [],
-      created_at: new Date().toISOString(),
-      sync_pending: true, // Se intentará sincronizar si luego tienes IDs válidos
-      _offlineMode: true,
-      _reason: 'Test User ID or Invalid UUID',
-    };
-    
-    if (saveOfflineSale(offlineSale)) {
-      return { 
-        success: true, 
-        data: offlineSale, 
-        warning: 'Venta guardada localmente (Usuario de prueba).' 
-      };
-    }
-    
-    return { 
-      success: false, 
-      error: 'Error al guardar venta local' 
-    };
-  }
-
-  // ========================================
-  // SUPABASE - GUARDAR EN BASE DE DATOS
-  // ========================================
+  // MODO ONLINE - SUPABASE
   try {
     console.log('📡 [sales.api] Guardando en Supabase...');
 
@@ -304,18 +251,18 @@ export const createSale = async (saleData) => {
   }
 };
 
- /**
+/**
  * ===========================================
- * OBTENER VENTAS - HÍBRIDO (NUBE + LOCAL)
+ * OBTENER VENTAS - HÍBRIDO
  * ===========================================
  */
 export const getSales = async (filters = {}) => {
   console.log('📋 [sales.api] Obteniendo ventas con filtros:', filters);
   
-  // 1. LEER SIEMPRE LO LOCAL PRIMERO
+  // Leer ventas locales
   const localSales = getOfflineSales();
 
-  // Si estamos puramente offline, devolver solo lo local
+  // Si estamos offline, retornar solo locales
   if (!isSupabaseConfigured()) {
     console.log('📦 [sales.api] Retornando ventas offline:', localSales.length);
     return {
@@ -329,7 +276,7 @@ export const getSales = async (filters = {}) => {
     };
   }
 
-  // Si estamos ONLINE, intentamos leer de la nube y mezclar
+  // Si estamos ONLINE, mezclar con la nube
   try {
     let query = supabase
       .from('sales')
@@ -341,7 +288,6 @@ export const getSales = async (filters = {}) => {
 
     const { search, invoiceType, status, startDate, endDate, page = 1, limit = 50 } = filters;
 
-    // Filtros de búsqueda (igual que antes)
     if (search) query = query.or(`sale_number.ilike.%${search}%,invoice_number.ilike.%${search}%`);
     if (invoiceType) query = query.eq('invoice_type', invoiceType);
     if (status) query = query.eq('status', status);
@@ -350,7 +296,6 @@ export const getSales = async (filters = {}) => {
 
     query = query.order('date', { ascending: false });
 
-    // Paginación
     const from = (page - 1) * limit;
     query = query.range(from, from + limit - 1);
 
@@ -358,11 +303,10 @@ export const getSales = async (filters = {}) => {
 
     if (error) throw error;
 
-    // 🔥🔥 AQUÍ ESTÁ EL TRUCO: FUSIÓN DE DATOS 🔥🔥
-    // Combinamos lo que viene de la nube (vacío) con lo local (tus 4 ventas)
+    // 🔥 FUSIÓN DE DATOS
     const allSales = [...(remoteSales || []), ...localSales];
 
-    // Ordenar todas por fecha (las más nuevas primero)
+    // Ordenar por fecha
     allSales.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
 
     console.log(`✅ [sales.api] Ventas combinadas: ${remoteSales?.length || 0} nube + ${localSales.length} locales`);
@@ -378,73 +322,14 @@ export const getSales = async (filters = {}) => {
     };
 
   } catch (error) {
-    console.error('[sales.api] Error obteniendo ventas de nube, mostrando locales:', error);
-    // Si falla internet, mostramos lo local
+    console.error('[sales.api] Error obteniendo ventas de nube:', error);
     return {
       success: true,
       data: { sales: localSales, total: localSales.length, page: 1, totalPages: 1 },
-      warning: 'Mostrando solo ventas offline (Error de conexión)',
+      warning: 'Mostrando solo ventas offline',
     };
   }
 };
-
-  // Si hay Supabase, intentamos traer datos de la nube
-  try {
-    let query = supabase
-      .from('sales')
-      .select(`
-        *,
-        client:clients(id, name, document_number),
-        items:sale_items(*)
-      `, { count: 'exact' });
-
-    const { search, invoiceType, status, startDate, endDate, page = 1, limit = 50 } = filters;
-
-    if (search) query = query.or(`sale_number.ilike.%${search}%,invoice_number.ilike.%${search}%`);
-    if (invoiceType) query = query.eq('invoice_type', invoiceType);
-    if (status) query = query.eq('status', status);
-    if (startDate) query = query.gte('date', startDate);
-    if (endDate) query = query.lte('date', endDate);
-
-    query = query.order('date', { ascending: false });
-
-    // Paginación
-    const from = (page - 1) * limit;
-    query = query.range(from, from + limit - 1);
-
-    const { data: remoteSales, error, count } = await query;
-
-    if (error) throw error;
-
-    // 🔥 FUSIÓN DE DATOS: Combinar Nube + Local
-    // Esto asegura que veas tus ventas de prueba aunque estés "Online"
-    const allSales = [...(remoteSales || []), ...localSales];
-
-    // Ordenar todas por fecha descendente (más nuevas primero)
-    allSales.sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-
-    console.log(`✅ [sales.api] Ventas combinadas: ${remoteSales?.length || 0} nube + ${localSales.length} locales`);
-
-    return {
-      success: true,
-      data: {
-        sales: allSales, // Devolvemos la lista combinada
-        total: (count || 0) + localSales.length,
-        page,
-        totalPages: Math.ceil(((count || 0) + localSales.length) / limit),
-      },
-    };
-
-  } catch (error) {
-    console.error('[sales.api] Error obteniendo ventas de nube, mostrando locales:', error);
-    // En caso de error de red, mostramos las locales como respaldo
-    return {
-      success: true,
-      data: { sales: localSales, total: localSales.length, page: 1, totalPages: 1 },
-      warning: 'Mostrando solo ventas offline (Error de conexión)',
-    };
-  }
-;
 
 /**
  * ===========================================
@@ -566,6 +451,31 @@ export const cancelSale = async (id, reason, userId) => {
   }
 };
 
+export const searchSales = async (query) => {
+  return getSales({ search: query, limit: 20 });
+};
+
+export const getNextInvoiceNumber = async (invoiceType, pointOfSale, branchId) => {
+  // Implementación simplificada para modo offline
+  const sales = getOfflineSales();
+  const filtered = sales.filter(s => 
+    s.invoice_type === invoiceType && 
+    s.point_of_sale === pointOfSale
+  );
+  
+  const maxNumber = filtered.reduce((max, s) => {
+    const num = parseInt(s.invoice_number) || 0;
+    return num > max ? num : max;
+  }, 0);
+
+  return { success: true, data: maxNumber + 1 };
+};
+
+export const getMonthlySummary = async (year, month, branchId = null) => {
+  // Implementación simplificada
+  return { success: true, data: {} };
+};
+
 export default {
   getSales,
   getSaleById,
@@ -573,4 +483,7 @@ export default {
   cancelSale,
   getSalesStats,
   getTodaySales,
+  searchSales,
+  getNextInvoiceNumber,
+  getMonthlySummary,
 };

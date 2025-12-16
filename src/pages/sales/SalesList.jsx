@@ -1,7 +1,7 @@
-// src/pages/sales/SalesList.jsx - VERSIÓN CON AUTO-REFRESH
+// src/pages/sales/SalesList.jsx - VERSIÓN CORREGIDA
 
 import { useState, useMemo, useEffect } from 'react';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import {
@@ -20,6 +20,7 @@ import { useCurrentBranch } from '../../store/slices/authSlice';
 import { formatCurrency, formatDateTime, formatDate } from '../../utils/formatters';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
+import * as salesApi from '../../services/api/sales.api';
 
 const INVOICE_TYPE_COLORS = {
   A: 'bg-purple-100 text-purple-800 border-purple-300',
@@ -29,46 +30,55 @@ const INVOICE_TYPE_COLORS = {
   P: 'bg-orange-100 text-orange-800 border-orange-300',
 };
 
-// ========================================
-// FUNCIONES PARA LEER DATOS OFFLINE
-// ========================================
-const getOfflineSales = () => {
-  try {
-    const data = localStorage.getItem('factusystem_offline_sales');
-    return data ? JSON.parse(data) : [];
-  } catch (error) {
-    console.error('Error leyendo ventas offline:', error);
-    return [];
-  }
-};
-
 export default function SalesList() {
   const branch = useCurrentBranch();
 
-  // 🔥 CORREGIDO: Fechas con rango amplio por defecto
   const [filters, setFilters] = useState({
     search: '',
     invoiceType: '',
     status: '',
-    startDate: '', // 🔥 Vacío = sin filtro de fecha inicial
-    endDate: '',   // 🔥 Vacío = sin filtro de fecha final
+    startDate: '',
+    endDate: '',
   });
 
   const [selectedSale, setSelectedSale] = useState(null);
-  const [isOfflineMode, setIsOfflineMode] = useState(!isSupabaseConfigured());
-  const [offlineSales, setOfflineSales] = useState([]);
+  const [isOfflineMode] = useState(!isSupabaseConfigured());
+  const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // 🔥 NUEVO: Para forzar re-render
 
-  // ========================================
-  // 🔥 NUEVO: ESCUCHAR EVENTOS DE VENTAS NUEVAS
-  // ========================================
+  // 🔥 CARGAR VENTAS AL MONTAR Y AL REFRESCAR
+  const loadSales = async () => {
+    console.log('🔄 [SalesList] Cargando ventas...');
+    setLoading(true);
+    
+    try {
+      const result = await salesApi.getSales(filters);
+      
+      if (result.success) {
+        console.log('✅ [SalesList] Ventas cargadas:', result.data.sales.length);
+        setSales(result.data.sales || []);
+      } else {
+        console.error('❌ [SalesList] Error:', result.error);
+        toast.error('Error al cargar ventas');
+      }
+    } catch (error) {
+      console.error('❌ [SalesList] Error crítico:', error);
+      toast.error('Error al cargar ventas');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cargar al montar
+  useEffect(() => {
+    loadSales();
+  }, []);
+
+  // 🔥 ESCUCHAR NUEVAS VENTAS OFFLINE
   useEffect(() => {
     const handleNewSale = (event) => {
       console.log('🎉 [SalesList] Nueva venta detectada:', event.detail);
-      // Recargar ventas
-      const sales = getOfflineSales();
-      setOfflineSales(sales);
+      loadSales(); // Recargar lista
       toast.success('Nueva venta registrada');
     };
 
@@ -79,110 +89,59 @@ export default function SalesList() {
     };
   }, []);
 
-  // ========================================
-  // CARGAR VENTAS AL MONTAR Y AL CAMBIAR FILTROS
-  // ========================================
-  useEffect(() => {
-    console.log('🔍 [SalesList] Verificando modo de operación...');
-    const offline = !isSupabaseConfigured();
-    setIsOfflineMode(offline);
+  // Filtrar ventas localmente
+  const filteredSales = useMemo(() => {
+    let filtered = [...sales];
     
-    if (offline) {
-      console.log('📦 [SalesList] MODO OFFLINE - Cargando ventas desde localStorage');
-      const sales = getOfflineSales();
-      console.log('✅ [SalesList] Ventas offline cargadas:', sales.length);
-      if (sales.length > 0) {
-        console.table(sales.map(s => ({
-          id: s.id,
-          tipo: s.invoice_type,
-          numero: s.invoice_number,
-          total: s.total,
-          fecha: s.date,
-          cliente: s.client?.name
-        })));
-      }
-      setOfflineSales(sales);
-    } else {
-      console.log('🌐 [SalesList] MODO ONLINE - Usando React Query');
+    // Filtro de búsqueda
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      filtered = filtered.filter(s => 
+        s.sale_number?.toLowerCase().includes(searchLower) ||
+        s.invoice_number?.toString().includes(searchLower) ||
+        s.client?.name?.toLowerCase().includes(searchLower)
+      );
     }
-  }, [refreshTrigger]); // 🔥 Reacciona a refreshTrigger
-
-  // Recargar cuando cambian los filtros
-  useEffect(() => {
-    if (isOfflineMode) {
-      console.log('🔄 [SalesList] Aplicando filtros en modo offline');
-      const sales = getOfflineSales();
-      setOfflineSales(sales);
+    
+    // Filtro de tipo
+    if (filters.invoiceType) {
+      filtered = filtered.filter(s => s.invoice_type === filters.invoiceType);
     }
-  }, [filters.search, filters.invoiceType, filters.status, filters.startDate, filters.endDate, isOfflineMode]);
-
-  // ========================================
-  // USAR DATOS OFFLINE
-  // ========================================
-  const sales = useMemo(() => {
-    if (isOfflineMode) {
-      console.log('📋 [SalesList] Usando ventas offline para la lista:', offlineSales.length);
-      
-      let filtered = [...offlineSales];
-      
-      // Filtro de búsqueda
-      if (filters.search) {
-        const searchLower = filters.search.toLowerCase();
-        filtered = filtered.filter(s => 
-          s.sale_number?.toLowerCase().includes(searchLower) ||
-          s.invoice_number?.toString().includes(searchLower) ||
-          s.client?.name?.toLowerCase().includes(searchLower)
-        );
-      }
-      
-      // Filtro de tipo de factura
-      if (filters.invoiceType) {
-        filtered = filtered.filter(s => s.invoice_type === filters.invoiceType);
-      }
-      
-      // Filtro de estado
-      if (filters.status) {
-        filtered = filtered.filter(s => s.status === filters.status);
-      }
-      
-      // Filtro de fecha - 🔥 SOLO aplica si hay valor
-      if (filters.startDate) {
-        const filterStart = new Date(filters.startDate);
-        filtered = filtered.filter(s => {
-          const saleDate = new Date(s.date || s.created_at);
-          return saleDate >= filterStart;
-        });
-      }
-      if (filters.endDate) {
-        const filterEnd = new Date(filters.endDate);
-        filterEnd.setHours(23, 59, 59, 999); // Incluir todo el día
-        filtered = filtered.filter(s => {
-          const saleDate = new Date(s.date || s.created_at);
-          return saleDate <= filterEnd;
-        });
-      }
-      
-      // Ordenar por fecha descendente
-      filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
-      
-      console.log('✅ [SalesList] Ventas filtradas:', filtered.length);
-      return filtered;
+    
+    // Filtro de estado
+    if (filters.status) {
+      filtered = filtered.filter(s => s.status === filters.status);
     }
-    return [];
-  }, [isOfflineMode, offlineSales, filters]);
+    
+    // Filtro de fecha
+    if (filters.startDate) {
+      const filterStart = new Date(filters.startDate);
+      filtered = filtered.filter(s => {
+        const saleDate = new Date(s.date || s.created_at);
+        return saleDate >= filterStart;
+      });
+    }
+    
+    if (filters.endDate) {
+      const filterEnd = new Date(filters.endDate);
+      filterEnd.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(s => {
+        const saleDate = new Date(s.date || s.created_at);
+        return saleDate <= filterEnd;
+      });
+    }
+    
+    return filtered;
+  }, [sales, filters]);
 
-  // ========================================
-  // CALCULAR ESTADÍSTICAS
-  // ========================================
+  // Calcular estadísticas
   const stats = useMemo(() => {
-    console.log('📊 [SalesList] Calculando estadísticas...');
-    
-    const totalSales = sales.length;
-    const totalRevenue = sales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
+    const totalSales = filteredSales.length;
+    const totalRevenue = filteredSales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
     const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
     
     const byInvoiceType = {};
-    sales.forEach(sale => {
+    filteredSales.forEach(sale => {
       const type = sale.invoice_type || 'X';
       if (!byInvoiceType[type]) {
         byInvoiceType[type] = { count: 0, total: 0 };
@@ -191,45 +150,281 @@ export default function SalesList() {
       byInvoiceType[type].total += parseFloat(sale.total) || 0;
     });
 
-    console.log('✅ [SalesList] Estadísticas calculadas:', {
-      totalSales,
-      totalRevenue,
-      averageTicket,
-      byInvoiceType,
-    });
-
     return {
       totalSales,
       totalRevenue,
       averageTicket,
       byInvoiceType,
     };
-  }, [sales]);
+  }, [filteredSales]);
 
-  // ========================================
-  // HANDLERS
-  // ========================================
   const handleFilterChange = (key, value) => {
-    console.log(`🔧 [SalesList] Cambiando filtro ${key}:`, value);
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   const handleViewSale = (sale) => {
-    console.log('👁️ [SalesList] Viendo venta:', sale);
     setSelectedSale(sale);
   };
 
   const handleRefresh = () => {
-    console.log('🔄 [SalesList] Refrescando ventas...');
-    if (isOfflineMode) {
-      const sales = getOfflineSales();
-      console.log('📊 [SalesList] Ventas recargadas:', sales.length);
-      setOfflineSales(sales);
-      setRefreshTrigger(prev => prev + 1); // 🔥 Forzar re-render
-      toast.success(`${sales.length} ventas cargadas`);
-    } else {
-      toast.success('Lista actualizada');
+    loadSales();
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Imprimir factura
+  const handlePrintInvoice = (sale) => {
+    const printWindow = window.open('', '_blank');
+    const invoiceHTML = generateInvoiceHTML(sale);
+    
+    printWindow.document.write(invoiceHTML);
+    printWindow.document.close();
+    
+    // Esperar a que cargue el contenido y luego imprimir
+    printWindow.onload = () => {
+      printWindow.print();
+    };
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Descargar como PDF
+  const handleDownloadPDF = async (sale) => {
+    try {
+      // Importar jsPDF dinámicamente
+      const { default: jsPDF } = await import('jspdf');
+      const html2canvas = (await import('html2canvas')).default;
+      
+      // Obtener el contenido de la factura
+      const invoiceElement = document.getElementById('invoice-content');
+      
+      if (!invoiceElement) {
+        toast.error('Error al generar PDF');
+        return;
+      }
+
+      // Mostrar toast de progreso
+      toast.loading('Generando PDF...', { id: 'pdf-generation' });
+
+      // Convertir a canvas
+      const canvas = await html2canvas(invoiceElement, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Crear PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const imgWidth = 210; // A4 width in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+
+      // Guardar PDF
+      const filename = `Factura_${sale.invoice_type}_${String(sale.point_of_sale).padStart(4, '0')}-${String(sale.invoice_number).padStart(8, '0')}.pdf`;
+      pdf.save(filename);
+
+      toast.success('PDF descargado correctamente', { id: 'pdf-generation' });
+    } catch (error) {
+      console.error('Error generando PDF:', error);
+      toast.error('Error al generar PDF', { id: 'pdf-generation' });
     }
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Generar HTML de la factura para imprimir
+  const generateInvoiceHTML = (sale) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Factura ${sale.invoice_type} ${String(sale.point_of_sale).padStart(4, '0')}-${String(sale.invoice_number).padStart(8, '0')}</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            body {
+              font-family: Arial, sans-serif;
+              padding: 20px;
+              background: white;
+            }
+            .invoice {
+              max-width: 800px;
+              margin: 0 auto;
+              background: white;
+              padding: 40px;
+              border: 1px solid #ddd;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #333;
+            }
+            .header h1 {
+              font-size: 28px;
+              margin-bottom: 10px;
+            }
+            .header .invoice-type {
+              font-size: 20px;
+              font-weight: bold;
+              margin: 10px 0;
+            }
+            .header .invoice-number {
+              font-size: 16px;
+              margin: 5px 0;
+            }
+            .header .date {
+              font-size: 12px;
+              color: #666;
+            }
+            .client-info {
+              margin-bottom: 20px;
+              font-size: 14px;
+            }
+            .client-info p {
+              margin: 5px 0;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+            }
+            thead {
+              background: #f5f5f5;
+            }
+            th, td {
+              padding: 12px;
+              text-align: left;
+              border-bottom: 1px solid #ddd;
+            }
+            th {
+              font-weight: bold;
+            }
+            .text-center {
+              text-align: center;
+            }
+            .text-right {
+              text-align: right;
+            }
+            .total-section {
+              margin-top: 20px;
+              padding-top: 20px;
+              border-top: 2px solid #333;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+            }
+            .payment-methods {
+              font-size: 12px;
+            }
+            .payment-methods p {
+              margin: 3px 0;
+            }
+            .total-amount {
+              font-size: 24px;
+              font-weight: bold;
+              text-align: right;
+            }
+            .footer {
+              margin-top: 30px;
+              text-align: center;
+              font-size: 12px;
+              color: #666;
+            }
+            .cae-info {
+              margin-top: 10px;
+              font-size: 11px;
+              background: #f9f9f9;
+              padding: 10px;
+              border-radius: 5px;
+            }
+            @media print {
+              body {
+                padding: 0;
+              }
+              .invoice {
+                border: none;
+                box-shadow: none;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="invoice">
+            <div class="header">
+              <h1>MI NEGOCIO</h1>
+              <div class="invoice-type">FACTURA ${sale.invoice_type || 'X'}</div>
+              <div class="invoice-number">
+                N°: ${String(sale.point_of_sale || 1).padStart(4, '0')}-${String(sale.invoice_number).padStart(8, '0')}
+              </div>
+              <div class="date">${formatDateTime(sale.date || sale.created_at)}</div>
+              ${sale.cae ? `
+                <div class="cae-info">
+                  <strong>CAE:</strong> ${sale.cae}<br>
+                  <strong>Vto. CAE:</strong> ${formatDate(sale.cae_expiration)}
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="client-info">
+              <p><strong>Cliente:</strong> ${getClientName(sale)}</p>
+              ${sale.client?.document_number ? `<p><strong>Documento:</strong> ${sale.client.document_number}</p>` : ''}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th class="text-center">Cant.</th>
+                  <th class="text-right">Precio</th>
+                  <th class="text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(sale.items || []).map(item => `
+                  <tr>
+                    <td>${item.product_name || item.name}</td>
+                    <td class="text-center">${item.quantity}</td>
+                    <td class="text-right">${formatCurrency(item.unit_price || item.price)}</td>
+                    <td class="text-right"><strong>${formatCurrency(item.total || (item.price * item.quantity))}</strong></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+
+            <div class="total-section">
+              <div class="payment-methods">
+                ${sale.payments && sale.payments.length > 0 ? `
+                  <p><strong>Formas de Pago:</strong></p>
+                  ${sale.payments.map(p => `<p>${p.method}: ${formatCurrency(p.amount)}</p>`).join('')}
+                ` : ''}
+              </div>
+              <div class="total-amount">
+                TOTAL: ${formatCurrency(sale.total)}
+              </div>
+            </div>
+
+            <div class="footer">
+              <p>Gracias por su compra</p>
+              <p style="margin-top: 10px;">FactuSystem - Sistema de Facturación</p>
+            </div>
+          </div>
+
+          <script>
+            // Auto-cerrar ventana después de imprimir
+            window.onafterprint = function() {
+              window.close();
+            };
+          </script>
+        </body>
+      </html>
+    `;
   };
 
   const getClientName = (sale) => {
@@ -245,17 +440,14 @@ export default function SalesList() {
     <div className="h-full flex flex-col bg-slate-50">
       {/* Header con estadísticas */}
       <div className="bg-white border-b px-6 py-4">
-        {/* Indicador de modo offline */}
         {isOfflineMode && (
           <div className="mb-4 bg-orange-50 border-l-4 border-orange-400 p-3 rounded-r-lg">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-orange-600" />
               <div>
-                <p className="text-sm font-bold text-orange-800">
-                  Modo Offline
-                </p>
+                <p className="text-sm font-bold text-orange-800">Modo Offline</p>
                 <p className="text-xs text-orange-700">
-                  Mostrando ventas guardadas localmente ({offlineSales.length} ventas). Las ventas se sincronizarán cuando configures Supabase.
+                  Mostrando ventas guardadas localmente ({sales.length} ventas)
                 </p>
               </div>
             </div>
@@ -266,26 +458,13 @@ export default function SalesList() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Ventas</h1>
             <p className="text-sm text-slate-500">
-              {filters.startDate && filters.endDate ? (
-                <>
-                  {format(new Date(filters.startDate), "d 'de' MMMM", { locale: es })} - {' '}
-                  {format(new Date(filters.endDate), "d 'de' MMMM yyyy", { locale: es })}
-                </>
-              ) : (
-                'Todas las ventas'
-              )}
+              {filteredSales.length} ventas encontradas
             </p>
           </div>
           
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              icon={RefreshCw}
-              onClick={handleRefresh}
-            >
-              Actualizar
-            </Button>
-          </div>
+          <Button variant="outline" icon={RefreshCw} onClick={handleRefresh}>
+            Actualizar
+          </Button>
         </div>
 
         {/* Tarjetas de resumen */}
@@ -294,9 +473,7 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-100 text-sm font-medium">Total Ventas</p>
-                <p className="text-3xl font-bold">
-                  {stats.totalSales}
-                </p>
+                <p className="text-3xl font-bold">{stats.totalSales}</p>
               </div>
               <Receipt className="w-10 h-10 text-blue-200" />
             </div>
@@ -306,9 +483,7 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-100 text-sm font-medium">Recaudación</p>
-                <p className="text-3xl font-bold">
-                  {formatCurrency(stats.totalRevenue)}
-                </p>
+                <p className="text-3xl font-bold">{formatCurrency(stats.totalRevenue)}</p>
               </div>
               <DollarSign className="w-10 h-10 text-green-200" />
             </div>
@@ -318,9 +493,7 @@ export default function SalesList() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-100 text-sm font-medium">Ticket Promedio</p>
-                <p className="text-3xl font-bold">
-                  {formatCurrency(stats.averageTicket)}
-                </p>
+                <p className="text-3xl font-bold">{formatCurrency(stats.averageTicket)}</p>
               </div>
               <TrendingUp className="w-10 h-10 text-purple-200" />
             </div>
@@ -336,9 +509,6 @@ export default function SalesList() {
                       {tipo}: {data.count}
                     </span>
                   ))}
-                  {Object.keys(stats.byInvoiceType).length === 0 && (
-                    <span className="text-xs bg-white/20 px-2 py-1 rounded">Sin datos</span>
-                  )}
                 </div>
               </div>
               <FileText className="w-10 h-10 text-slate-400" />
@@ -354,28 +524,39 @@ export default function SalesList() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Buscar por N° factura, cliente..."
+              placeholder="Buscar..."
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               value={filters.search}
               onChange={(e) => handleFilterChange('search', e.target.value)}
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={filters.startDate}
-              onChange={(e) => handleFilterChange('startDate', e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-            <span className="text-slate-400">-</span>
-            <input
-              type="date"
-              value={filters.endDate}
-              onChange={(e) => handleFilterChange('endDate', e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
+          <select
+            value={filters.invoiceType}
+            onChange={(e) => handleFilterChange('invoiceType', e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="">Todos los tipos</option>
+            <option value="A">Factura A</option>
+            <option value="B">Factura B</option>
+            <option value="C">Factura C</option>
+            <option value="X">Factura X</option>
+            <option value="P">Presupuesto</option>
+          </select>
+
+          <input
+            type="date"
+            value={filters.startDate}
+            onChange={(e) => handleFilterChange('startDate', e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+          
+          <input
+            type="date"
+            value={filters.endDate}
+            onChange={(e) => handleFilterChange('endDate', e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
         </div>
       </div>
 
@@ -385,13 +566,10 @@ export default function SalesList() {
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
-        ) : sales.length === 0 ? (
+        ) : filteredSales.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
             <Receipt className="w-16 h-16 mb-4 text-slate-300" />
             <p className="text-lg font-medium">No se encontraron ventas</p>
-            {isOfflineMode && (
-              <p className="text-sm mt-2">Realiza una venta para que aparezca aquí</p>
-            )}
           </div>
         ) : (
           <table className="w-full">
@@ -405,7 +583,7 @@ export default function SalesList() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sales.map((sale) => (
+              {filteredSales.map((sale) => (
                 <tr key={sale.id} className="hover:bg-blue-50/50 transition">
                   <td className="px-4 py-3">
                     <div className="text-sm font-medium text-slate-900">
@@ -449,15 +627,41 @@ export default function SalesList() {
       {selectedSale && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
+            {/* Header con botones de acción */}
             <div className="p-4 border-b flex justify-between items-center bg-slate-50">
               <h2 className="text-lg font-bold">Detalle de Venta</h2>
-              <button onClick={() => setSelectedSale(null)} className="p-2 hover:bg-slate-200 rounded">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePrintInvoice(selectedSale)}
+                  className="flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  Imprimir
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleDownloadPDF(selectedSale)}
+                  className="flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Descargar PDF
+                </Button>
+                <button onClick={() => setSelectedSale(null)} className="p-2 hover:bg-slate-200 rounded">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
+            {/* Contenido de la factura */}
             <div className="flex-1 overflow-y-auto p-8">
-              <div className="bg-white shadow-lg p-8 rounded-lg">
+              <div id="invoice-content" className="bg-white shadow-lg p-8 rounded-lg">
                 <div className="text-center mb-6">
                   <h1 className="text-2xl font-bold mb-2">MI NEGOCIO</h1>
                   <div className="py-2 border-y">
@@ -466,11 +670,20 @@ export default function SalesList() {
                       N°: {String(selectedSale.point_of_sale || 1).padStart(4, '0')}-{String(selectedSale.invoice_number).padStart(8, '0')}
                     </p>
                     <p className="text-xs text-gray-500">{formatDateTime(selectedSale.date || selectedSale.created_at)}</p>
+                    {selectedSale.cae && (
+                      <div className="mt-2 text-xs">
+                        <p><strong>CAE:</strong> {selectedSale.cae}</p>
+                        <p><strong>Vto. CAE:</strong> {formatDate(selectedSale.cae_expiration)}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="mb-4 text-sm">
                   <p><strong>Cliente:</strong> {getClientName(selectedSale)}</p>
+                  {selectedSale.client?.document_number && (
+                    <p><strong>Documento:</strong> {selectedSale.client.document_number}</p>
+                  )}
                 </div>
 
                 <table className="w-full mb-4 text-sm">
@@ -494,8 +707,28 @@ export default function SalesList() {
                   </tbody>
                 </table>
 
-                <div className="border-t-2 pt-4 text-right">
-                  <p className="text-2xl font-bold">TOTAL: {formatCurrency(selectedSale.total)}</p>
+                <div className="border-t-2 pt-4">
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm">
+                      {selectedSale.payments && selectedSale.payments.length > 0 && (
+                        <div>
+                          <p className="font-bold mb-1">Formas de Pago:</p>
+                          {selectedSale.payments.map((p, i) => (
+                            <p key={i} className="text-xs">
+                              {p.method}: {formatCurrency(p.amount)}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold">TOTAL: {formatCurrency(selectedSale.total)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 text-center text-xs text-gray-500">
+                  <p>Gracias por su compra</p>
                 </div>
               </div>
             </div>
