@@ -10,6 +10,10 @@ import BranchSelector from './pages/auth/BranchSelector';
 import CashOpening from './pages/auth/CashOpening';
 import Billing from './pages/billing/Billing';
 import SalesList from './pages/sales/SalesList';
+import ProductsList from './pages/products/ProductsList';
+import ProductForm from './pages/products/ProductForm';
+import LowStockPanel from './pages/products/LowStockPanel';
+import TransfersManager from './pages/products/TransfersManager';
 
 // Settings
 import Settings from './pages/settings/Settings';
@@ -112,6 +116,13 @@ function App() {
                     <Route path="billing" element={<Billing />} />
                     <Route path="sales" element={<SalesList />} />
                     
+                    {/* RUTAS DE PRODUCTOS AGREGADAS AQUÍ */}
+                    <Route path="products" element={<ProductsList />} />
+                    <Route path="products/new" element={<ProductForm />} />
+                    <Route path="products/edit/:id" element={<ProductForm />} />
+                    <Route path="products/low-stock" element={<LowStockPanel />} />
+                    <Route path="products/transfers" element={<TransfersManager />} />
+
                     {/* Configuraciones */}
                     <Route path="settings" element={<Settings />} />
                     <Route path="settings/users" element={<UsersManagement />} />

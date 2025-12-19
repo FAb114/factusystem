@@ -26,7 +26,7 @@ import { formatCurrency, formatNumber } from '../../utils/formatters';
 import Button from '../../components/ui/Button';
 import { useCurrentBranch } from '../../store/slices/authSlice';
 import * as productsApi from '../../services/api/products.api';
-import * as advancedApi from '../../services/api/products.advanced.api';
+import * as advancedApi from '../../services/api/products.api';
 
 export default function ProductsList() {
   const navigate = useNavigate();

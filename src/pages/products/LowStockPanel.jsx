@@ -24,7 +24,7 @@ import toast from 'react-hot-toast';
 import { formatCurrency, formatNumber, formatDateTime } from '../../utils/formatters';
 import Button from '../../components/ui/Button';
 import { useCurrentUser, useCurrentBranch } from '../../store/slices/authSlice';
-import * as advancedApi from '../../services/api/products.advanced.api';
+import * as advancedApi from '../../services/api/products.api';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 

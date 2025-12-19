@@ -21,7 +21,7 @@ import toast from 'react-hot-toast';
 import { formatDateTime, formatNumber } from '../../utils/formatters';
 import Button from '../../components/ui/Button';
 import { useCurrentUser, useCurrentBranch } from '../../store/slices/authSlice';
-import * as advancedApi from '../../services/api/products.advanced.api';
+import * as advancedApi from '../../services/api/products.api';
 
 const STATUS_CONFIG = {
   pending: {

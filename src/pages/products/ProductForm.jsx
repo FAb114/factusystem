@@ -22,7 +22,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { useCurrentBranch } from '../../store/slices/authSlice';
 import * as productsApi from '../../services/api/products.api';
-import * as advancedApi from '../../services/api/products.advanced.api';
+import * as advancedApi from '../../services/api/products.api';
 
 const UNITS = [
   { value: 'un', label: 'Unidad' },
